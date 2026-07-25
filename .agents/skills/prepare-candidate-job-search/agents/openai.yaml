@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prepare Candidate Job Search"
+  short_description: "Turn candidate facts into draft search policy"
+  default_prompt: "Use $prepare-candidate-job-search to build or validate the canonical candidate profile from the supplied CV evidence, then create a reviewable job-search policy."

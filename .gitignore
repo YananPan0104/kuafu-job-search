@@ -1,0 +1,36 @@
+# Candidate-specific and generated runtime data
+/cases/
+/discovery/
+/PROJECT_STATUS.md
+
+# Non-canonical development copies and local validation helpers
+/skill-src/
+/.tmp-skill-validator/
+
+# Candidate source documents and generated application artifacts
+*.docx
+*.pdf
+
+# Secrets and local configuration
+.env
+.env.*
+*.pem
+*.key
+id_ed25519*
+
+# Python and Node caches
+__pycache__/
+*.py[cod]
+node_modules/
+
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test and coverage output
+.coverage
+coverage/
+htmlcov/
+test-results/

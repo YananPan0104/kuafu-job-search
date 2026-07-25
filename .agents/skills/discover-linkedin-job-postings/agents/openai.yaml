@@ -1,0 +1,4 @@
+interface:
+  display_name: "Discover LinkedIn Job Postings"
+  short_description: "Discover and extract auditable LinkedIn jobs"
+  default_prompt: "Use $discover-linkedin-job-postings to run active LinkedIn searches and produce an auditable JobPosting bundle."

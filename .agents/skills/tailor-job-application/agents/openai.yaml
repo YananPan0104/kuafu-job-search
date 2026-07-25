@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tailor Job Application"
+  short_description: "Screen jobs and tailor evidence-based CVs"
+  default_prompt: "Use $tailor-job-application to screen this job and prepare an auditable ATS CV proposal."
