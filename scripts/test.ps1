@@ -20,6 +20,7 @@ $node = Resolve-CommandPath @("node")
 $pythonTests = @(
     ".agents/skills/prepare-candidate-job-search/scripts/test_candidate_search_policy.py",
     ".agents/skills/discover-linkedin-job-postings/scripts/test_query_portfolio_workflow.py",
+    ".agents/skills/discover-linkedin-job-postings/scripts/test_materialize_browser_checkpoint.py",
     ".agents/skills/discover-linkedin-job-postings/scripts/test_validate_discovery_run.py",
     ".agents/skills/tailor-job-application/scripts/test_materialize_screening_batch.py"
 )

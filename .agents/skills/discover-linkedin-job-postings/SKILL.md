@@ -30,9 +30,9 @@ Read `references/data-contracts.md` before creating or validating these artifact
 8. Run title and metadata triage with `scripts/linkedin_discovery.mjs`. Use only `FORWARD`, `MANUAL_REVIEW`, and `SKIP_FIRST_LEVEL` at this stage.
 9. Preserve every skipped card and its reason. Do not discard URLs or job IDs.
 10. Open only forwarded or manually reviewed jobs. Prefer selecting the same-page detail pane through the search page's visible `currentJobId` URL state using a job ID collected from a visible card. Verify the title and `About the job` heading. Use a card click and then an independent job page only as bounded fallbacks. Normalize the visible JD to schema.org `JobPosting` JSON and Markdown, and record extraction warnings.
-11. Checkpoint each successfully extracted job immediately. Do not wait for the full detail loop to finish before persisting it; a later navigation failure must not discard earlier results.
+11. Checkpoint each attempted detail immediately. Preserve failed jobs with their card metadata, original source URL, canonical LinkedIn URL, extraction warnings, and any partially captured description; a later navigation failure must not discard earlier results or the links needed for manual review.
 12. Cache by LinkedIn job ID and content hash. Merge query provenance when a job appears in more than one query.
-13. Materialize a browser checkpoint with `scripts/materialize_browser_checkpoint.py`, write `run-manifest.json`, and validate it with `scripts/validate_discovery_run.py`.
+13. Materialize a browser checkpoint with `scripts/materialize_browser_checkpoint.py`, write `run-manifest.json`, `failed-jobs.json`, and `failed-jobs.md`, then validate the run with `scripts/validate_discovery_run.py`. Treat `failed-jobs.md` as the user-facing manual-review queue with directly clickable LinkedIn links.
 14. Hand every retrieved or cached normalized JobPosting artifact directly to `tailor-job-application` for detailed screening. Do not add a human confirmation gate between validated extraction and screening.
 
 ## Decision boundary
@@ -61,7 +61,7 @@ When the German-title policy is enabled, ignore `m/w/d`, location names, and com
 
 ## Output contract
 
-Create one run directory containing `run-manifest.json` and a `jobs/` directory. Store one schema.org JobPosting JSON file and one readable Markdown file for each retrieved JD. Keep candidate fit claims out of JobPosting files.
+Create one run directory containing `run-manifest.json`, `failed-jobs.json`, `failed-jobs.md`, and a `jobs/` directory. Store one schema.org JobPosting JSON file and one readable Markdown file for each retrieved JD. For every `retrieval_failed` job, retain title, company, location, job ID, query provenance, canonical and captured source URLs, failure codes, and any partial description in the failed-job review artifacts. Keep candidate fit claims out of JobPosting and failed-job files.
 
 Use English for artifacts, filenames, reason codes, and configuration. Communicate with the user in their preferred language.
 

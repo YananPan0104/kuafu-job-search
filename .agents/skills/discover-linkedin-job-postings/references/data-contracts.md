@@ -85,11 +85,19 @@ Each job requires:
 - `reason_codes`
 - `collection_status`
 
+For `retrieval_failed`, schema 1.1 manifests additionally require:
+
+- `manual_review_required` equal to `true`;
+- `review_url`, using the stable canonical LinkedIn job URL;
+- non-empty `retrieval_warnings`.
+
 Valid collection statuses are `not_requested`, `skipped_before_detail`, `retrieved`, `cached`, and `retrieval_failed`.
 
 For `retrieved` and `cached`, require `jobposting_json` and `jobposting_markdown` paths relative to the run directory.
 
 Metrics require `cards_discovered`, `details_skipped`, `details_retrieved`, `cache_hits`, and `retrieval_failed`. Counts must match job records.
+
+Schema 1.1 manifests require `failed_jobs_review` with relative paths to `failed-jobs.json` and `failed-jobs.md`, plus a count matching `metrics.retrieval_failed`. The JSON review queue preserves job ID, title, company, location, canonical URL, captured source URL, query provenance, failure codes, and any partial description. The Markdown queue provides a directly clickable canonical LinkedIn link for every failed job. Schema 1.0 manifests remain valid for historical compatibility.
 
 ## JobPosting handoff
 

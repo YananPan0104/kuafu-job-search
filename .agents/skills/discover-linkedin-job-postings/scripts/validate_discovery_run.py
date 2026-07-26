@@ -48,6 +48,70 @@ def validate_jobposting(path: Path) -> None:
             raise ValueError(f"{path}: {key} must be a non-empty string")
 
 
+def resolve_run_artifact(run_dir: Path, relative_path: str, label: str) -> Path:
+    path = (run_dir / relative_path).resolve()
+    try:
+        path.relative_to(run_dir.resolve())
+    except ValueError as exc:
+        raise ValueError(f"{label}: artifact path must stay inside the run directory") from exc
+    if not path.is_file():
+        raise ValueError(f"{label}: referenced artifact does not exist")
+    return path
+
+
+def validate_failed_jobs_review(manifest: dict, run_dir: Path, failed_ids: set[str]) -> None:
+    review = manifest.get("failed_jobs_review")
+    if not isinstance(review, dict):
+        raise ValueError("schema 1.1 run manifest requires failed_jobs_review")
+    require_keys(review, {"json", "markdown", "count"}, "failed_jobs_review")
+    if review["count"] != len(failed_ids):
+        raise ValueError("failed_jobs_review.count must match retrieval_failed jobs")
+
+    json_path = resolve_run_artifact(run_dir, review["json"], "failed_jobs_review.json")
+    markdown_path = resolve_run_artifact(
+        run_dir, review["markdown"], "failed_jobs_review.markdown"
+    )
+    payload = load_json(json_path)
+    require_keys(payload, {"schema_version", "run_id", "source", "jobs"}, str(json_path))
+    if payload["run_id"] != manifest["run_id"] or payload["source"] != "linkedin":
+        raise ValueError("failed-jobs.json run_id/source must match the run manifest")
+    if not isinstance(payload["jobs"], list):
+        raise ValueError("failed-jobs.json jobs must be an array")
+
+    review_ids: set[str] = set()
+    markdown_text = markdown_path.read_text(encoding="utf-8")
+    for index, job in enumerate(payload["jobs"]):
+        label = f"failed-jobs.json jobs[{index}]"
+        require_keys(
+            job,
+            {
+                "job_id",
+                "title",
+                "company",
+                "location",
+                "canonical_url",
+                "source_url",
+                "review_url",
+                "query_ids",
+                "first_level_decision",
+                "reason_codes",
+                "retrieval_warnings",
+                "partial_description",
+            },
+            label,
+        )
+        job_id = str(job["job_id"])
+        review_ids.add(job_id)
+        if not isinstance(job["review_url"], str) or not job["review_url"].strip():
+            raise ValueError(f"{label}: review_url must be a non-empty string")
+        if not isinstance(job["retrieval_warnings"], list) or not job["retrieval_warnings"]:
+            raise ValueError(f"{label}: retrieval_warnings must be a non-empty array")
+        if job["review_url"] not in markdown_text:
+            raise ValueError(f"{label}: review URL is missing from failed-jobs.md")
+    if review_ids != failed_ids:
+        raise ValueError("failed-jobs.json IDs must match retrieval_failed jobs")
+
+
 def validate_manifest(path: Path) -> dict:
     manifest = load_json(path)
     require_keys(
@@ -74,7 +138,9 @@ def validate_manifest(path: Path) -> dict:
         raise ValueError("run manifest jobs must be an array")
 
     run_dir = path.parent
+    requires_failed_review = str(manifest["schema_version"]) != "1.0"
     seen_ids: set[str] = set()
+    failed_ids: set[str] = set()
     counts = {
         "cards_discovered": len(manifest["jobs"]),
         "details_skipped": 0,
@@ -120,6 +186,19 @@ def validate_manifest(path: Path) -> dict:
             counts["cache_hits"] += 1
         elif status == "retrieval_failed":
             counts["retrieval_failed"] += 1
+            failed_ids.add(job_id)
+            if requires_failed_review:
+                require_keys(
+                    job,
+                    {"manual_review_required", "review_url", "retrieval_warnings"},
+                    label,
+                )
+                if job["manual_review_required"] is not True:
+                    raise ValueError(f"{label}: manual_review_required must be true")
+                if not isinstance(job["review_url"], str) or not job["review_url"].strip():
+                    raise ValueError(f"{label}: review_url must be a non-empty string")
+                if not isinstance(job["retrieval_warnings"], list) or not job["retrieval_warnings"]:
+                    raise ValueError(f"{label}: retrieval_warnings must be a non-empty array")
 
         if status in {"retrieved", "cached"}:
             require_keys(job, {"jobposting_json", "jobposting_markdown"}, label)
@@ -140,6 +219,9 @@ def validate_manifest(path: Path) -> dict:
             raise ValueError(
                 f"metrics.{key} is {manifest['metrics'][key]!r}; expected {expected}"
             )
+
+    if requires_failed_review:
+        validate_failed_jobs_review(manifest, run_dir, failed_ids)
 
     return {"run_id": manifest["run_id"], "jobs": len(manifest["jobs"]), "valid": True}
 

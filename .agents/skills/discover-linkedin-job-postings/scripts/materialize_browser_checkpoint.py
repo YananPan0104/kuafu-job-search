@@ -20,6 +20,87 @@ def canonical_url(job_id: str) -> str:
     return f"https://www.linkedin.com/jobs/view/{job_id}/"
 
 
+def failed_review_entry(card: dict, detail: dict | None) -> dict:
+    job_id = str(card["job_id"])
+    warnings = list((detail or {}).get("extraction_warnings", []))
+    if not warnings:
+        warnings = ["DETAIL_NOT_RETRIEVED_AND_CACHE_MISS"]
+    return {
+        "job_id": job_id,
+        "title": card["title"],
+        "company": card["company"],
+        "location": card.get("location", ""),
+        "canonical_url": canonical_url(job_id),
+        "source_url": card.get("source_url") or canonical_url(job_id),
+        "review_url": canonical_url(job_id),
+        "query_ids": card.get("query_ids", []),
+        "first_level_decision": card["first_level_decision"],
+        "reason_codes": card.get("reason_codes", []),
+        "retrieval_warnings": warnings,
+        "partial_description": (detail or {}).get("description", "").strip(),
+    }
+
+
+def failed_review_markdown(run_id: str, failed_jobs: list[dict]) -> str:
+    lines = [
+        "# Failed job-description retrievals",
+        "",
+        f"- Run ID: {run_id}",
+        f"- Jobs requiring manual review: {len(failed_jobs)}",
+        "",
+    ]
+    if not failed_jobs:
+        lines.extend(["No failed job-description retrievals.", ""])
+        return "\n".join(lines)
+
+    for job in failed_jobs:
+        lines.extend(
+            [
+                f"## {job['title']} - {job['company']}",
+                "",
+                f"- [Open LinkedIn job]({job['review_url']})",
+                f"- Job ID: {job['job_id']}",
+                f"- Location: {job['location'] or 'Not captured'}",
+                f"- Query IDs: {', '.join(job['query_ids']) or 'Not captured'}",
+                f"- Failure codes: {', '.join(job['retrieval_warnings'])}",
+                f"- Captured source URL: {job['source_url']}",
+                "",
+            ]
+        )
+        if job["partial_description"]:
+            lines.extend(
+                [
+                    "### Partially captured description",
+                    "",
+                    job["partial_description"],
+                    "",
+                ]
+            )
+    return "\n".join(lines)
+
+
+def write_failed_review_artifacts(
+    run_dir: Path, run_id: str, failed_jobs: list[dict]
+) -> dict:
+    json_rel = "failed-jobs.json"
+    markdown_rel = "failed-jobs.md"
+    payload = {
+        "schema_version": "1.0",
+        "run_id": run_id,
+        "source": "linkedin",
+        "jobs": failed_jobs,
+    }
+    (run_dir / json_rel).write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (run_dir / markdown_rel).write_text(
+        failed_review_markdown(run_id, failed_jobs),
+        encoding="utf-8",
+    )
+    return {"json": json_rel, "markdown": markdown_rel, "count": len(failed_jobs)}
+
+
 def markdown(posting: dict) -> str:
     organization = posting["hiringOrganization"]["name"]
     location = (
@@ -140,7 +221,9 @@ def main() -> None:
             "job_id": job_id,
             "title": card["title"],
             "company": card["company"],
+            "location": card.get("location", ""),
             "canonical_url": canonical_url(job_id),
+            "source_url": card.get("source_url") or canonical_url(job_id),
             "query_ids": card.get("query_ids", []),
             "first_level_decision": card["first_level_decision"],
             "reason_codes": card.get("reason_codes", []),
@@ -191,6 +274,24 @@ def main() -> None:
                 )
         jobs.append(entry)
 
+    cards_by_id = {str(card["job_id"]): card for card in cards}
+    failed_jobs = []
+    for entry in jobs:
+        if entry["collection_status"] != "retrieval_failed":
+            continue
+        job_id = entry["job_id"]
+        failed = failed_review_entry(cards_by_id[job_id], details.get(job_id))
+        failed_jobs.append(failed)
+        entry.update(
+            {
+                "manual_review_required": True,
+                "review_url": failed["review_url"],
+                "retrieval_warnings": failed["retrieval_warnings"],
+            }
+        )
+
+    failed_jobs_review = write_failed_review_artifacts(run_dir, run_id, failed_jobs)
+
     metrics = {
         "cards_discovered": len(jobs),
         "details_skipped": sum(
@@ -209,7 +310,7 @@ def main() -> None:
         "query_visible_card_counts": dict(sorted(counts_by_query.items())),
     }
     manifest = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "run_id": run_id,
         "candidate_id": portfolio["candidate_id"],
         "source": "linkedin",
@@ -221,6 +322,7 @@ def main() -> None:
         "policy_path": str(args.policy.resolve()),
         "filter_verification": filter_verification,
         "jobs": jobs,
+        "failed_jobs_review": failed_jobs_review,
         "metrics": metrics,
         "warnings": checkpoint.get("warnings", []),
     }

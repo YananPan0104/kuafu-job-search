@@ -40,7 +40,7 @@ For a direct `/jobs/view/<id>/` page, use staged rendering: observe the header, 
 
 Record incomplete text, collapsed sections, external redirects, missing company, and missing location as warnings. Do not treat an incomplete extraction as a hard-gate failure.
 
-Persist each verified detail immediately after extraction, keyed by LinkedIn job ID. A batch controller must resume from this checkpoint and skip already retrieved IDs. Do not keep the only copy of completed descriptions in an in-memory loop that can fail on a later navigation.
+Persist each detail attempt immediately, keyed by LinkedIn job ID. For a failed attempt, preserve the discovered card, captured source URL, canonical job URL, extraction warnings, and any partial description. A batch controller must resume from this checkpoint and skip already retrieved IDs. Do not keep the only copy of completed descriptions or failed-job review links in an in-memory loop that can fail on a later navigation.
 
 If search-page navigation becomes unavailable after cards have already been collected, one bounded direct `/jobs/view/<discovered-id>/` attempt per remaining card is allowed. Record `DIRECT_PAGE_FALLBACK_USED` and retain the original query provenance. This fallback never authorizes guessing or enumerating job IDs.
 
@@ -56,5 +56,7 @@ Write artifacts locally, validate the manifest, and report:
 - cache hits;
 - retrieval failures;
 - filter fallbacks.
+
+Also materialize `failed-jobs.json` and `failed-jobs.md` even when the failed count is zero. When failures exist, report the Markdown file as the manual-review queue so the user can open each job directly.
 
 Do not save, apply, follow companies, create alerts, or change LinkedIn settings.
