@@ -1,0 +1,11 @@
+{
+  "name": "kuafu-unattended-runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node test/phase1-runner.test.mjs && node test/phase2-browser.test.mjs && node test/phase3-discovery.test.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.61.1"
+  }
+}

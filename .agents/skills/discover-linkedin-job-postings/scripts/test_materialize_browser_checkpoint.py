@@ -67,7 +67,18 @@ with tempfile.TemporaryDirectory() as temp_dir:
                 "first_level_decision": "MANUAL_REVIEW",
                 "reason_codes": ["TITLE_REVIEW_SIGNAL"],
             },
+            {
+                "job_id": "333333333",
+                "title": "Finance Analyst",
+                "company": "Example Bank",
+                "location": "Frankfurt, Germany",
+                "source_url": "https://www.linkedin.com/jobs/view/333333333/",
+                "query_ids": ["T1"],
+                "first_level_decision": "FORWARD",
+                "reason_codes": [],
+            },
         ],
+        "detail_requested_job_ids": ["111111111", "222222222"],
         "details": [
             {
                 "job_id": "111111111",
@@ -80,6 +91,18 @@ with tempfile.TemporaryDirectory() as temp_dir:
                 "query_ids": ["T1"],
             }
         ],
+        "filter_verification": {
+            "T1": {
+                "status": "verified_visible_controls",
+                "requested": portfolio["queries"][0]["filters"],
+                "observed": {
+                    "date_posted_visible": True,
+                    "sort_by_visible": True,
+                },
+                "ui_fallback_used": False,
+                "warnings": [],
+            }
+        },
         "warnings": [],
     }
     portfolio_path = root / "portfolio.json"
@@ -108,13 +131,18 @@ with tempfile.TemporaryDirectory() as temp_dir:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_version"] == "1.1"
     assert manifest["metrics"]["retrieval_failed"] == 2
+    assert next(job for job in manifest["jobs"] if job["job_id"] == "333333333")["collection_status"] == "not_requested"
+    assert manifest["filter_verification"] == checkpoint["filter_verification"]
     assert manifest["failed_jobs_review"] == {
         "json": "failed-jobs.json",
         "markdown": "failed-jobs.md",
         "count": 2,
     }
-    assert all(job["manual_review_required"] for job in manifest["jobs"])
-    assert all(job["review_url"].startswith("https://www.linkedin.com/jobs/view/") for job in manifest["jobs"])
+    failed_manifest_jobs = [
+        job for job in manifest["jobs"] if job["collection_status"] == "retrieval_failed"
+    ]
+    assert all(job["manual_review_required"] for job in failed_manifest_jobs)
+    assert all(job["review_url"].startswith("https://www.linkedin.com/jobs/view/") for job in failed_manifest_jobs)
 
     review = json.loads((run_dir / "failed-jobs.json").read_text(encoding="utf-8"))
     assert review["jobs"][0]["partial_description"] == "Partially captured responsibilities"
@@ -128,7 +156,7 @@ with tempfile.TemporaryDirectory() as temp_dir:
     assert "Partially captured responsibilities" in review_markdown
     assert validate_manifest(manifest_path) == {
         "run_id": "failed-review-test",
-        "jobs": 2,
+        "jobs": 3,
         "valid": True,
     }
 

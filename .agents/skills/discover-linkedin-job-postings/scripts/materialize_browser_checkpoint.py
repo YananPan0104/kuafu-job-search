@@ -190,6 +190,10 @@ def main() -> None:
     run_id = checkpoint["run_id"]
     cards = checkpoint["cards"]
     details = {str(item["job_id"]): item for item in checkpoint["details"]}
+    requested_detail_ids = {
+        str(job_id) for job_id in checkpoint.get("detail_requested_job_ids", [])
+    }
+    has_requested_detail_ids = "detail_requested_job_ids" in checkpoint
     (run_dir / "jobs").mkdir(parents=True, exist_ok=True)
 
     counts_by_query = Counter(
@@ -197,22 +201,21 @@ def main() -> None:
     )
     for query in portfolio["queries"]:
         counts_by_query.setdefault(query["query_id"], 0)
-    filter_verification = {}
+    filter_verification = dict(checkpoint.get("filter_verification", {}))
     for query in portfolio["queries"]:
         query_id = query["query_id"]
-        filter_verification[query_id] = {
-            "status": (
-                "verified_visible_controls"
-                if query_id == "T1"
-                else "verified_loaded_search_url"
-            ),
-            "requested": query["filters"],
-            "observed": {
-                **query["filters"],
-                "unique_visible_cards": counts_by_query[query_id],
+        filter_verification.setdefault(
+            query_id,
+            {
+                "status": "verification_missing",
+                "requested": query["filters"],
+                "observed": {
+                    "unique_visible_cards": counts_by_query[query_id],
+                },
+                "ui_fallback_used": False,
+                "warnings": ["FILTER_VERIFICATION_MISSING_FROM_CHECKPOINT"],
             },
-            "ui_fallback_used": False,
-        }
+        )
 
     jobs = []
     for card in cards:
@@ -251,7 +254,9 @@ def main() -> None:
         else:
             source_json = args.cache_run.resolve() / "jobs" / f"{job_id}.json"
             source_md = args.cache_run.resolve() / "jobs" / f"{job_id}.md"
-            if not source_json.is_file() or not source_md.is_file():
+            if has_requested_detail_ids and job_id not in requested_detail_ids:
+                entry["collection_status"] = "not_requested"
+            elif not source_json.is_file() or not source_md.is_file():
                 entry["collection_status"] = "retrieval_failed"
             else:
                 cached = load_json(source_json)

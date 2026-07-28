@@ -14,8 +14,9 @@ function Resolve-CommandPath {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$python = Resolve-CommandPath @("python", "python3")
-$node = Resolve-CommandPath @("node")
+$bundledRuntime = Join-Path $env:USERPROFILE ".cache/codex-runtimes/codex-primary-runtime/dependencies"
+$python = Resolve-CommandPath @("python", "python3", (Join-Path $bundledRuntime "python/python.exe"))
+$node = Resolve-CommandPath @("node", (Join-Path $bundledRuntime "node/bin/node.exe"))
 
 $pythonTests = @(
     ".agents/skills/prepare-candidate-job-search/scripts/test_candidate_confirmations.py",
@@ -27,6 +28,9 @@ $pythonTests = @(
 )
 
 $nodeTests = @(
+    "runtime/test/phase1-runner.test.mjs",
+    "runtime/test/phase2-browser.test.mjs",
+    "runtime/test/phase3-discovery.test.mjs",
     ".agents/skills/discover-linkedin-job-postings/scripts/test_linkedin_discovery.mjs",
     ".agents/skills/discover-linkedin-job-postings/scripts/test_linkedin_split_pane_adapter.mjs"
 )
