@@ -15,8 +15,14 @@ Require:
 - `default_filters` in the human-readable vocabulary accepted by the LinkedIn URL builder;
 - `search_targets`, initially proposed and evidence-linked;
 - `confirmation_items`, with required choices marked `open` or `resolved`.
+- `screening_gates`, an array kept empty by default and populated only through explicit candidate approval;
+- `confirmation_ledger`, when durable confirmations are enabled, containing the ledger path, candidate ID, `as_of`, and fingerprint.
 
 Valid policy statuses are `draft` and `confirmed`. A confirmed policy requires at least one search target and no required open confirmation.
+
+Each resolved confirmation item should include `ledger_confirmation_id`. The referenced active ledger entry must include the policy item ID in `scope.policy_confirmation_ids`, and its answer must match the policy answer. Legacy policies without a ledger remain readable, but any migrated or newly confirmed policy must validate against the ledger.
+
+Each active screening gate requires `id`, `criterion`, `confirmation_id`, `ledger_confirmation_id`, and `status`. Its policy confirmation must be resolved, and the active ledger entry must include the gate ID in `scope.screening_gate_ids`. Migration never creates screening gates automatically.
 
 ## Search target
 

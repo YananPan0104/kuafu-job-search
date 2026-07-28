@@ -6,7 +6,7 @@ The project is an MVP. It supports a human-triggered daily run in Codex and keep
 
 ## Included skills
 
-- `prepare-candidate-job-search`: converts a raw CV and supporting evidence into a canonical, evidence-linked candidate profile and a reviewable search policy.
+- `prepare-candidate-job-search`: converts raw evidence and durable candidate confirmations into a canonical, evidence-linked candidate profile and a reviewable search policy.
 - `discover-linkedin-job-postings`: compiles approved search targets into LinkedIn queries, performs auditable first-level filtering, deduplicates results, and normalizes visible job descriptions.
 - `tailor-job-application`: performs detailed requirement screening and produces auditable ATS CV and cover-letter proposals for jobs that pass the hard gates.
 
@@ -14,7 +14,7 @@ The skills are stored in `.agents/skills/`. After cloning and opening the reposi
 
 ## Privacy boundary
 
-Reusable skill code and documentation are tracked in Git. Candidate CVs, profiles, policies, collected job descriptions, screening results, and generated application files are local runtime data and are ignored by Git.
+Reusable skill code and documentation are tracked in Git. Candidate CVs, profiles, confirmation ledgers, policies, collected job descriptions, screening results, and generated application files are local runtime data and are ignored by Git.
 
 Before adding files, verify that they contain no real candidate name, contact details, employer-confidential information, credentials, or machine-specific paths.
 
@@ -45,6 +45,7 @@ Python tests use only project scripts except for document-generation features, w
 ## Documentation
 
 - [Architecture and control boundaries](docs/architecture/job-discovery-pipeline.md)
+- [Daily discovery runbook](.agents/skills/discover-linkedin-job-postings/references/daily-runbook.md)
 - [中文项目介绍](docs/zh-CN/project-introduction.md)
 - [中文端到端流程](docs/zh-CN/job-search-pipeline.md)
 

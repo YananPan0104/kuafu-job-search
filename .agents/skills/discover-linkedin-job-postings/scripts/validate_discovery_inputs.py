@@ -28,7 +28,12 @@ def profile_fingerprint(profile: dict) -> str:
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
 
-def validate_inputs(profile: dict, policy: dict, portfolio: dict) -> dict:
+def artifact_fingerprint(value: dict) -> str:
+    payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def validate_inputs(profile: dict, policy: dict, portfolio: dict, confirmations: dict | None = None) -> dict:
     ids = {
         "profile": str(profile.get("candidate_id", "")),
         "policy": str(policy.get("candidate_id", "")),
@@ -73,6 +78,24 @@ def validate_inputs(profile: dict, policy: dict, portfolio: dict) -> dict:
         raise ValueError("active queries require a confirmed job-search policy")
     if active and open_required:
         raise ValueError(f"active queries are blocked by open required confirmations: {open_required}")
+    ledger_ref = policy.get("confirmation_ledger")
+    if ledger_ref:
+        if confirmations is None:
+            raise ValueError("policy references a confirmation ledger but none was supplied")
+        if str(confirmations.get("candidate_id")) != ids["profile"]:
+            raise ValueError("candidate_id mismatch between discovery inputs and confirmation ledger")
+        if ledger_ref.get("fingerprint") != artifact_fingerprint(confirmations):
+            raise ValueError("policy confirmation_ledger fingerprint does not match confirmation ledger")
+        active_ledger = {str(item.get("id")): item for item in confirmations.get("confirmations", []) if item.get("status") == "active"}
+        for index, item in enumerate(policy.get("confirmation_items", [])):
+            if item.get("status") != "resolved":
+                continue
+            ledger_id = str(item.get("ledger_confirmation_id", ""))
+            ledger_item = active_ledger.get(ledger_id)
+            if not ledger_item or item.get("id") not in ledger_item.get("scope", {}).get("policy_confirmation_ids", []):
+                raise ValueError(f"resolved confirmation_items[{index}] lacks an active scoped ledger entry")
+            if ledger_item.get("answer") != item.get("answer"):
+                raise ValueError(f"resolved confirmation_items[{index}] answer differs from confirmation ledger")
     return {
         "candidate_id": ids["profile"],
         "policy_status": policy.get("status"),
@@ -89,13 +112,16 @@ def main() -> None:
     parser.add_argument("--profile", type=Path, required=True)
     parser.add_argument("--policy", type=Path, required=True)
     parser.add_argument("--portfolio", type=Path, required=True)
+    parser.add_argument("--confirmations", type=Path)
     parser.add_argument("--candidate-root", type=Path)
     args = parser.parse_args()
     if args.candidate_root:
         ensure_inside(args.profile, args.candidate_root, "profile")
         ensure_inside(args.policy, args.candidate_root, "policy")
         ensure_inside(args.portfolio, args.candidate_root, "portfolio")
-    result = validate_inputs(load_json(args.profile), load_json(args.policy), load_json(args.portfolio))
+        if args.confirmations:
+            ensure_inside(args.confirmations, args.candidate_root, "confirmations")
+    result = validate_inputs(load_json(args.profile), load_json(args.policy), load_json(args.portfolio), load_json(args.confirmations) if args.confirmations else None)
     print(json.dumps(result, ensure_ascii=False))
 
 

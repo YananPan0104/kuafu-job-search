@@ -13,27 +13,43 @@ Require for execution:
 
 - an evidence-linked `candidate-profile.json`;
 - a separate confirmed `job-search-policy.json`;
+- the candidate-local `candidate-confirmations.json` when referenced by the policy;
 - a `query-portfolio.json` containing at least one reviewed `active` query;
 - a manual, scheduled, or event trigger with a stable run ID.
 
 Read `references/data-contracts.md` before creating or validating these artifacts. Read `references/linkedin-browser-workflow.md` before operating LinkedIn.
+For a recurring daily or recovery run, also read `references/daily-runbook.md` before execution.
 
 ## Workflow
+
+### Prepare
 
 1. Validate that candidate facts and search policy are separate. Treat language ability as a fact and title-language handling as policy.
 2. When a portfolio does not exist, run `scripts/generate_query_portfolio.py` with the candidate profile, draft or confirmed policy, and an explicit run profile. It compiles evidence-linked search targets into source-specific Boolean queries. A confirmed policy's `approved` targets become `active`; proposed targets and targets in a draft policy remain `draft`. Use the policy's daily profile for recurring production runs and a separately bounded capability-test profile when broader input is needed for evaluation.
 3. Treat target approval in Skill A as authorization for its deterministic compiled query; do not ask for a duplicate query-activation confirmation. If must-groups, exclusions, or target-level filters change, return the target to `proposed` for review before execution. Never silently modify an active query.
-4. Run `scripts/validate_discovery_inputs.py` before browser execution. Require matching candidate IDs and source versions. Active queries require a confirmed policy with no required open confirmation.
-5. Use `scripts/linkedin_discovery.mjs` to build deterministic search URLs from query specifications.
-6. Open each URL in the authenticated Codex in-app browser. Verify visible filter state once. Use UI controls only as a fallback when URL parameters fail.
-7. Use `scripts/linkedin_split_pane_adapter.mjs` to collect visible result-card metadata in one pass: job ID, title, company, location, URL, query ID, and visible status markers.
-8. Run title and metadata triage with `scripts/linkedin_discovery.mjs`. Use only `FORWARD`, `MANUAL_REVIEW`, and `SKIP_FIRST_LEVEL` at this stage.
-9. Preserve every skipped card and its reason. Do not discard URLs or job IDs.
-10. Open only forwarded or manually reviewed jobs. Prefer selecting the same-page detail pane through the search page's visible `currentJobId` URL state using a job ID collected from a visible card. Verify the title and `About the job` heading. Use a card click and then an independent job page only as bounded fallbacks. Normalize the visible JD to schema.org `JobPosting` JSON and Markdown, and record extraction warnings.
-11. Checkpoint each attempted detail immediately. Preserve failed jobs with their card metadata, original source URL, canonical LinkedIn URL, extraction warnings, and any partially captured description; a later navigation failure must not discard earlier results or the links needed for manual review.
-12. Cache by LinkedIn job ID and content hash. Merge query provenance when a job appears in more than one query.
-13. Materialize a browser checkpoint with `scripts/materialize_browser_checkpoint.py`, write `run-manifest.json`, `failed-jobs.json`, and `failed-jobs.md`, then validate the run with `scripts/validate_discovery_run.py`. Treat `failed-jobs.md` as the user-facing manual-review queue with directly clickable LinkedIn links.
-14. Hand every retrieved or cached normalized JobPosting artifact directly to `tailor-job-application` for detailed screening. Do not add a human confirmation gate between validated extraction and screening.
+4. Run `scripts/validate_discovery_inputs.py` before browser execution. Require matching candidate IDs, source versions, and confirmation-ledger fingerprint and links when the policy references a ledger. Active queries require a confirmed policy with no required open confirmation.
+
+### Discover
+
+1. Use `scripts/linkedin_discovery.mjs` to build deterministic search URLs from query specifications.
+2. Open each URL in the authenticated Codex in-app browser. Verify visible filter state once. Use UI controls only as a fallback when URL parameters fail.
+3. Use `scripts/linkedin_split_pane_adapter.mjs` to collect visible result-card metadata in one pass: job ID, title, company, location, URL, query ID, and visible status markers.
+4. Run title and metadata triage with `scripts/linkedin_discovery.mjs`. Use only `FORWARD`, `MANUAL_REVIEW`, and `SKIP_FIRST_LEVEL` at this stage.
+5. Preserve every skipped card and its reason. Do not discard URLs or job IDs.
+6. Open only forwarded or manually reviewed jobs. After collecting their job IDs from visible cards, use `extractJobDetailsInParallel` to open canonical `/jobs/view/<discovered-id>/` pages in independent tabs with a default and hard maximum concurrency of 5. Verify the job ID, expected title, and a supported description heading; scroll once to trigger lazy rendering and use bounded condition-based waits. Persist each settled result immediately through the callback. Use same-page `currentJobId` navigation and exact-card selection only as bounded per-job fallbacks. Normalize the visible JD to schema.org `JobPosting` JSON and Markdown, and record extraction warnings.
+7. Checkpoint each attempted detail immediately. Preserve failed jobs with their card metadata, original source URL, canonical LinkedIn URL, extraction warnings, and any partially captured description; a later navigation failure must not discard earlier results or the links needed for manual review.
+8. Cache by LinkedIn job ID and content hash. Merge query provenance when a job appears in more than one query.
+
+### Materialize
+
+1. Materialize the browser checkpoint with `scripts/materialize_browser_checkpoint.py`.
+2. Write `run-manifest.json`, `failed-jobs.json`, `failed-jobs.md`, and the normalized files under `jobs/`.
+3. Run `scripts/validate_discovery_run.py`. Treat `failed-jobs.md` as the user-facing manual-review queue with directly clickable LinkedIn links.
+
+### Handoff
+
+1. Hand every retrieved or cached normalized JobPosting artifact directly to `tailor-job-application` for detailed screening.
+2. Do not add a human confirmation gate between validated extraction and screening. Keep application submission outside this skill.
 
 ## Decision boundary
 
@@ -70,8 +86,8 @@ Use English for artifacts, filenames, reason codes, and configuration. Communica
 - `scripts/linkedin_discovery.mjs build-url <query-spec.json>`: build a deterministic LinkedIn search URL.
 - `scripts/linkedin_discovery.mjs build-portfolio <query-portfolio.json>`: build URLs for active queries only.
 - `scripts/generate_query_portfolio.py --profile <profile.json> --policy <policy.json> --output <portfolio.json> [--run-profile <name>]`: compile approved targets from a confirmed policy into active queries and keep unapproved targets draft.
-- `scripts/validate_discovery_inputs.py --profile <profile.json> --policy <policy.json> --portfolio <portfolio.json> [--candidate-root <dir>]`: enforce candidate identity, source versions, and activation gates.
+- `scripts/validate_discovery_inputs.py --profile <profile.json> --policy <policy.json> --portfolio <portfolio.json> [--confirmations <candidate-confirmations.json>] [--candidate-root <dir>]`: enforce candidate identity, source versions, confirmation provenance, and activation gates.
 - `scripts/linkedin_discovery.mjs classify <cards.json> <policy.json>`: apply deterministic first-level title rules.
-- `scripts/linkedin_split_pane_adapter.mjs`: collect visible cards, select a same-page detail by discovered job ID or exact card fallback, verify it, and extract the visible description.
+- `scripts/linkedin_split_pane_adapter.mjs`: collect visible cards; open discovered job IDs in independent direct-detail tabs with a maximum concurrency of 5; checkpoint each settled result; and retain same-page selection helpers as bounded fallbacks.
 - `scripts/materialize_browser_checkpoint.py <browser-checkpoint.json> --portfolio <portfolio.json> --policy <policy.json> --cache-run <prior-run-dir>`: convert independently checkpointed cards and details into normalized JobPosting artifacts and an auditable run manifest.
 - `scripts/validate_discovery_run.py <run-manifest.json>`: validate run counts, decisions, artifacts, and JobPosting handoff files.

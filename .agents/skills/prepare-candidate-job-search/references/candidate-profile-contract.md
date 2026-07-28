@@ -4,7 +4,7 @@
 
 `prepare-candidate-job-search` owns creation and revision of the candidate profile. Store one canonical, versioned `candidate-profile.json` in the candidate workspace and pass its path explicitly to discovery and tailoring. Downstream skills may read and validate it but must not silently rebuild or overwrite it.
 
-Preserve the original CV and every supplemental source unchanged. Use portable source references relative to the candidate workspace when possible.
+Preserve the original CV and every supplemental source unchanged. Use portable source references relative to the candidate workspace when possible. Store explicit candidate answers in `candidate-confirmations.json` and reference their stable IDs from profile sources when they support a fact.
 
 ## CV onboarding
 
@@ -16,7 +16,7 @@ Create atomic facts. Each fact requires:
 - a source reference containing the artifact and a page, section, paragraph, table cell, or other stable locator;
 - one of `verified`, `source_claimed`, `needs_confirmation`, or `expired`.
 
-Use `source_claimed` for an uncorroborated CV statement. Reserve `verified` for facts corroborated by another supplied source or explicitly confirmed by the candidate. Do not infer work authorization, willingness to relocate, language level, seniority preference, metrics, ownership, or tool proficiency.
+Use `source_claimed` for an uncorroborated CV statement. Reserve `verified` for facts corroborated by another supplied source or explicitly confirmed by the candidate. A new explicit confirmation must be persisted in the confirmation ledger before it is relied upon. Do not infer work authorization, willingness to relocate, language level, seniority preference, metrics, ownership, or tool proficiency.
 
 Record incompatible source statements in `conflicts`. Record plausible but unsupported statements in `unverified_claims`; do not promote them into facts.
 

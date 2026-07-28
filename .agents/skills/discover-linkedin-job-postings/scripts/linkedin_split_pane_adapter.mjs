@@ -1,5 +1,7 @@
 import { extractLinkedInJobId } from "./linkedin_discovery.mjs";
 
+export const MAX_DIRECT_DETAIL_CONCURRENCY = 5;
+
 function compact(value) {
   return String(value ?? "").replace(/\s+/g, " ").trim();
 }
@@ -85,6 +87,24 @@ export function buildSplitPaneSelectionUrl(searchUrl, jobId) {
   return url.toString();
 }
 
+export function buildDirectJobUrl(jobId) {
+  const id = String(jobId ?? "").trim();
+  if (!/^\d+$/.test(id)) throw new Error("jobId must contain digits only");
+  return `https://www.linkedin.com/jobs/view/${id}/`;
+}
+
+function inspectDetailSnapshot(snapshot, card) {
+  const value = String(snapshot ?? "");
+  const key = normalized(value);
+  return {
+    expected_title_seen: key.includes(normalized(card?.title)),
+    detail_heading_visible: /about the job|über den job|infos zur stelle/i.test(value),
+    login_required: /sign in|join now/i.test(value),
+    access_challenge: /captcha|security verification|verify (?:that )?you(?:'re| are) human|quick security check/i.test(value),
+    job_unavailable: /no longer accepting applications|job is no longer available|stelle ist nicht mehr verfügbar/i.test(value),
+  };
+}
+
 export async function collectVisibleJobCards(tab, { queryId, limit = 25 } = {}) {
   const rawCards = await tab.playwright.evaluate(
     ({ maxAnchors }) => Array.from(document.querySelectorAll('a[href*="/jobs/view/"]'))
@@ -151,7 +171,7 @@ export async function extractSelectedJobDetail(tab, card) {
   const extracted = await tab.playwright.evaluate(({ expectedTitle }) => {
     const clean = (value) => String(value || "").replace(/\s+/g, " ").trim();
     const heading = Array.from(document.querySelectorAll("h1, h2, h3"))
-      .find((node) => clean(node.textContent).toLowerCase() === "about the job");
+      .find((node) => /^(about the job|über den job|infos zur stelle)$/i.test(clean(node.textContent)));
     if (!heading) return { description: "", selected_title: "" };
 
     const section = heading.parentElement?.parentElement || heading.parentElement;
@@ -183,6 +203,190 @@ export async function extractSelectedJobDetail(tab, card) {
     retrieval_status: description && titleMatches ? "retrieved" : "retrieval_failed",
     description,
     extraction_warnings: warnings,
+  };
+}
+
+export async function extractDirectJobPage(
+  tab,
+  card,
+  { waitScheduleMs = [500, 1000, 2000], scrollY = 700 } = {},
+) {
+  if (!card?.job_id || !card?.title) {
+    throw new Error("card must include job_id and title");
+  }
+  const targetUrl = buildDirectJobUrl(card.job_id);
+  await tab.goto(targetUrl);
+  const finalUrl = typeof tab.url === "function" ? await tab.url() : targetUrl;
+  const pageTitle = typeof tab.title === "function" ? await tab.title() : null;
+  const jobIdVerified = extractLinkedInJobId(finalUrl) === String(card.job_id);
+  let snapshot = await tab.playwright.domSnapshot();
+  let state = inspectDetailSnapshot(snapshot, card);
+  let usedScrollFallback = false;
+  let waitAttempts = 0;
+
+  if (state.login_required || state.access_challenge) {
+    return {
+      job_id: card.job_id,
+      title: card.title,
+      company: card.company ?? null,
+      location: card.location ?? null,
+      source_url: card.source_url ?? targetUrl,
+      query_ids: card.query_ids ?? [],
+      retrieval_status: "retrieval_failed",
+      description: "",
+      extraction_warnings: [state.access_challenge ? "ACCESS_CHALLENGE" : "LOGIN_REQUIRED"],
+      retrieval_method: "direct_job_page_parallel",
+      selection: {
+        mode: "direct_job_page",
+        selected_job_verified: false,
+        detail_heading_visible: false,
+        used_scroll_fallback: false,
+        wait_attempts: 0,
+        target_url: targetUrl,
+        final_url: finalUrl,
+        page_title: pageTitle,
+        job_id_verified: jobIdVerified,
+      },
+    };
+  }
+
+  if (!state.detail_heading_visible) {
+    await tab.dom_cua.scroll({ x: 0, y: scrollY });
+    usedScrollFallback = true;
+    snapshot = await tab.playwright.domSnapshot();
+    state = inspectDetailSnapshot(snapshot, card);
+  }
+
+  for (const delayMs of waitScheduleMs) {
+    if (state.expected_title_seen && state.detail_heading_visible) break;
+    await tab.playwright.waitForTimeout(delayMs);
+    waitAttempts += 1;
+    snapshot = await tab.playwright.domSnapshot();
+    state = inspectDetailSnapshot(snapshot, card);
+    if (state.login_required || state.access_challenge || state.job_unavailable) break;
+  }
+
+  if (!jobIdVerified || !state.expected_title_seen || !state.detail_heading_visible) {
+    const warnings = [];
+    if (state.login_required) warnings.push("LOGIN_REQUIRED");
+    if (state.access_challenge) warnings.push("ACCESS_CHALLENGE");
+    if (state.job_unavailable) warnings.push("JOB_UNAVAILABLE");
+    if (!jobIdVerified) warnings.push("DIRECT_PAGE_JOB_ID_MISMATCH");
+    if (!state.expected_title_seen) warnings.push("DIRECT_PAGE_TITLE_NOT_VERIFIED");
+    if (!state.detail_heading_visible) warnings.push("ABOUT_SECTION_NOT_VISIBLE");
+    return {
+      job_id: card.job_id,
+      title: card.title,
+      company: card.company ?? null,
+      location: card.location ?? null,
+      source_url: card.source_url ?? targetUrl,
+      query_ids: card.query_ids ?? [],
+      retrieval_status: "retrieval_failed",
+      description: "",
+      extraction_warnings: warnings,
+      retrieval_method: "direct_job_page_parallel",
+      selection: {
+        mode: "direct_job_page",
+        selected_job_verified: state.expected_title_seen,
+        detail_heading_visible: state.detail_heading_visible,
+        used_scroll_fallback: usedScrollFallback,
+        wait_attempts: waitAttempts,
+        target_url: targetUrl,
+        final_url: finalUrl,
+        page_title: pageTitle,
+        job_id_verified: jobIdVerified,
+      },
+    };
+  }
+
+  const detail = await extractSelectedJobDetail(tab, card);
+  return {
+    ...detail,
+    query_ids: card.query_ids ?? [],
+    retrieval_method: "direct_job_page_parallel",
+    selection: {
+      mode: "direct_job_page",
+      selected_job_verified: true,
+      detail_heading_visible: true,
+      used_scroll_fallback: usedScrollFallback,
+      wait_attempts: waitAttempts,
+      target_url: targetUrl,
+      final_url: finalUrl,
+      page_title: pageTitle,
+      job_id_verified: jobIdVerified,
+    },
+  };
+}
+
+export async function extractJobDetailsInParallel(
+  browser,
+  cards,
+  {
+    concurrency = MAX_DIRECT_DETAIL_CONCURRENCY,
+    onDetail = async () => {},
+    directOptions = {},
+  } = {},
+) {
+  if (!browser?.tabs?.new) throw new Error("browser must expose tabs.new()");
+  if (!Array.isArray(cards)) throw new Error("cards must be an array");
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > MAX_DIRECT_DETAIL_CONCURRENCY) {
+    throw new Error(`concurrency must be an integer between 1 and ${MAX_DIRECT_DETAIL_CONCURRENCY}`);
+  }
+  if (typeof onDetail !== "function") throw new Error("onDetail must be a function");
+
+  const results = new Array(cards.length);
+  let nextIndex = 0;
+  let stopReason = null;
+
+  const worker = async () => {
+    while (!stopReason) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= cards.length) return;
+      const card = cards[index];
+      let tab;
+      let detail;
+      try {
+        tab = await browser.tabs.new();
+        detail = await extractDirectJobPage(tab, card, directOptions);
+      } catch (error) {
+        detail = {
+          job_id: card?.job_id ?? null,
+          title: card?.title ?? null,
+          company: card?.company ?? null,
+          location: card?.location ?? null,
+          source_url: card?.source_url ?? null,
+          query_ids: card?.query_ids ?? [],
+          retrieval_status: "retrieval_failed",
+          description: "",
+          extraction_warnings: ["DIRECT_PAGE_NAVIGATION_FAILED"],
+          retrieval_method: "direct_job_page_parallel",
+          failure_stage: "navigation_or_extraction",
+        };
+      }
+      results[index] = detail;
+      try {
+        await onDetail(detail, card, index);
+      } catch {
+        detail.checkpoint_warning = "CHECKPOINT_CALLBACK_FAILED";
+        stopReason = stopReason ?? "CHECKPOINT_CALLBACK_FAILED";
+      }
+      if (detail.extraction_warnings?.includes("ACCESS_CHALLENGE")) stopReason = "ACCESS_CHALLENGE";
+      if (detail.extraction_warnings?.includes("LOGIN_REQUIRED")) stopReason = "LOGIN_REQUIRED";
+      if (tab) {
+        try { await tab.close(); } catch { /* tab cleanup is best effort */ }
+      }
+    }
+  };
+
+  const workerCount = Math.min(concurrency, cards.length);
+  await Promise.allSettled(Array.from({ length: workerCount }, () => worker()));
+  return {
+    concurrency,
+    max_concurrency: MAX_DIRECT_DETAIL_CONCURRENCY,
+    stopped: Boolean(stopReason),
+    stop_reason: stopReason,
+    results: results.filter(Boolean),
   };
 }
 

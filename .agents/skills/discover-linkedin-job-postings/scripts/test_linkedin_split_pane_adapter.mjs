@@ -8,7 +8,11 @@ import {
   collectVisibleJobCards,
   selectAndExtractSplitPane,
   buildSplitPaneSelectionUrl,
+  buildDirectJobUrl,
   navigateAndExtractSplitPane,
+  extractDirectJobPage,
+  extractJobDetailsInParallel,
+  MAX_DIRECT_DETAIL_CONCURRENCY,
 } from "./linkedin_split_pane_adapter.mjs";
 
 assert.equal(escapeCssAttributeValue('a"b\\c'), 'a\\"b\\\\c');
@@ -36,6 +40,8 @@ const selectionUrl = new URL(buildSplitPaneSelectionUrl(
 ));
 assert.equal(selectionUrl.searchParams.get("currentJobId"), "123456789");
 assert.equal(selectionUrl.searchParams.get("start"), "25");
+assert.equal(buildDirectJobUrl("123456789"), "https://www.linkedin.com/jobs/view/123456789/");
+assert.throws(() => buildDirectJobUrl("not-an-id"), /digits only/);
 
 let clicked = false;
 const fakeTab = {
@@ -123,5 +129,75 @@ const urlDetail = await navigateAndExtractSplitPane(
 assert.equal(new URL(navigatedUrl).searchParams.get("currentJobId"), "123456789");
 assert.equal(urlDetail.retrieval_status, "retrieved");
 assert.equal(urlDetail.selection.mode, "currentJobId_url");
+
+let directScrolled = false;
+const directTab = {
+  goto: async (url) => assert.equal(url, "https://www.linkedin.com/jobs/view/123456789/"),
+  dom_cua: {
+    scroll: async ({ x, y }) => {
+      assert.deepEqual({ x, y }, { x: 0, y: 700 });
+      directScrolled = true;
+    },
+  },
+  playwright: {
+    domSnapshot: async () => directScrolled
+      ? "Business Analyst\nheading About the job"
+      : "Business Analyst",
+    waitForTimeout: async () => {},
+    evaluate: async (fn, args) => ({
+      selected_title: args.expectedTitle,
+      description: "D".repeat(350),
+    }),
+  },
+};
+const directDetail = await extractDirectJobPage(directTab, cards[0]);
+assert.equal(directScrolled, true);
+assert.equal(directDetail.retrieval_status, "retrieved");
+assert.equal(directDetail.retrieval_method, "direct_job_page_parallel");
+assert.equal(directDetail.selection.mode, "direct_job_page");
+
+let activeTabs = 0;
+let peakTabs = 0;
+let checkpointed = 0;
+const parallelBrowser = {
+  tabs: {
+    new: async () => {
+      activeTabs += 1;
+      peakTabs = Math.max(peakTabs, activeTabs);
+      let scrolled = false;
+      return {
+        goto: async () => new Promise((resolve) => setTimeout(resolve, 5)),
+        dom_cua: { scroll: async () => { scrolled = true; } },
+        playwright: {
+          domSnapshot: async () => scrolled ? "Business Analyst\nAbout the job" : "Business Analyst",
+          waitForTimeout: async () => {},
+          evaluate: async (fn, args) => ({
+            selected_title: args.expectedTitle,
+            description: "P".repeat(350),
+          }),
+        },
+        close: async () => { activeTabs -= 1; },
+      };
+    },
+  },
+};
+const parallelCards = Array.from({ length: 8 }, (_, index) => ({
+  ...cards[0],
+  job_id: String(200000000 + index),
+}));
+const parallelResult = await extractJobDetailsInParallel(parallelBrowser, parallelCards, {
+  concurrency: 5,
+  onDetail: async () => { checkpointed += 1; },
+});
+assert.equal(MAX_DIRECT_DETAIL_CONCURRENCY, 5);
+assert.equal(parallelResult.results.length, 8);
+assert.equal(parallelResult.results.every((item) => item.retrieval_status === "retrieved"), true);
+assert.equal(checkpointed, 8);
+assert.equal(peakTabs, 5);
+assert.equal(activeTabs, 0);
+await assert.rejects(
+  extractJobDetailsInParallel(parallelBrowser, parallelCards, { concurrency: 6 }),
+  /between 1 and 5/,
+);
 
 process.stdout.write("linkedin_split_pane_adapter tests passed\n");

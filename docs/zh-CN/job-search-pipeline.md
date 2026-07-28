@@ -17,7 +17,7 @@
 flowchart TD
     A["原始 CV、补充材料和候选人说明"] --> B{"资料可读且身份一致？"}
     B -- "否" --> BX["停止：修复文件或解决事实冲突"]
-    B -- "是" --> C["生成 canonical candidate-profile.json"]
+    B -- "是" --> C["生成 canonical candidate-profile.json 和 candidate-confirmations.json"]
 
     C --> D{"关键搜索偏好和 targets 已确认？"}
     D -- "否" --> DX["候选人确认地点、合同、经验级别、语言和目标职位"]
@@ -67,6 +67,7 @@ flowchart TD
 ```text
 discovery/<candidate-id>/
   candidate-profile.json
+  candidate-confirmations.json
   job-search-policy.json
   query-portfolio.daily.json
   runs/
@@ -116,6 +117,8 @@ cases/
 6. 生成 canonical profile fingerprint。
 7. 将 profile 保存到候选人稳定目录。
 
+候选人在对话中提供的、会被后续流程依赖的回答必须写入 `candidate-confirmations.json`。对话只是录入渠道，不是持久化事实源。Ledger 分别记录事实确认、搜索偏好、最终 screening gate 和 override，并保留 question、typed answer、时间、来源、状态和适用范围。
+
 ### 门控
 
 - 文件不可读：停止并要求修复。
@@ -148,6 +151,8 @@ cases/
 
 批准 target 后，由其确定性编译出的 LinkedIn Query 自动成为 active，不再设置重复确认门。
 
+每个 resolved policy confirmation 必须链接 active ledger confirmation，且答案一致。搜索偏好默认只影响 discovery；除非 policy 和 ledger 明确把它标为最终筛选 gate，否则不得据此产生 `FAIL`。
+
 ## 6. Daily Query 阶段
 
 正式 daily portfolio 默认使用：
@@ -163,6 +168,7 @@ cases/
 - profile、policy 和 portfolio candidate ID 一致；
 - profile `as_of` 和 fingerprint 一致；
 - policy version 一致；
+- policy 引用的 confirmation ledger fingerprint、candidate ID、scope 和答案一致；
 - policy 为 confirmed；
 - 没有 required open confirmation。
 
@@ -216,13 +222,13 @@ cases/
 
 对 `FORWARD` 和配置为读取的 `MANUAL_REVIEW`：
 
-1. 优先使用 LinkedIn 搜索页 split pane。
-2. 使用来自可见卡片的 Job ID 设置 `currentJobId`。
-3. 验证打开的 title 与目标职位一致。
-4. 验证 `About the job` 区域可见。
-5. 提取完整可见 JD。
-6. 每完成一个职位立即保存 checkpoint。
-7. split pane 不可用时，对已发现 Job ID 使用一次有限 direct-page fallback。
+1. 使用从可见职位卡片收集的 Job ID，打开 canonical `/jobs/view/<id>/` 独立详情页。
+2. 使用 settled-result 语义并发提取，默认及最大并发数均不得超过 5。
+3. 验证页面 Job ID 和 title 与目标职位一致。
+4. 验证 `About the job`、`Über den Job` 或 `Infos zur Stelle` 描述区域可见；必要时滚动一次触发懒加载，并执行有限条件等待。
+5. 每完成或失败一个职位都立即保存 checkpoint，单个失败不得丢弃其他结果。
+6. direct page 失败时，先使用搜索页 `currentJobId` 导航，再使用精确卡片选择；两者都只是有限的逐职位 fallback。
+7. 不得按卡片位置猜测职位，也不得使用未从可见卡片收集的 Job ID。
 8. 按 Job ID 和 content hash 使用缓存。
 
 成功产出：
@@ -242,6 +248,8 @@ cases/
 - `hard`：明确或对核心职责不可缺少；
 - `soft`：有利但不会单独阻止申请；
 - `learnable`：可以学习，但不得作为当前技能写入 CV。
+
+候选人侧地点、工作模式、合同、出差、薪资或语言环境等硬门槛必须使用 `hardness_basis: candidate_policy`，同时引用 active policy screening gate、resolved policy item 和 active ledger confirmation。仅用于搜索的偏好不能自动成为最终 gate。
 
 ### 候选人状态
 
@@ -334,7 +342,7 @@ Recovery 属于临时运行配置，不能替换 daily portfolio 的正式默认
 - 尚无完整的端到端 durable state machine；
 - Query、screening 和 CV 构建之间尚未形成完整事务原子性；
 - 通过“一次只运行一个 daily task”规避并发冲突；
-- Query 和 JD 当前串行处理；
+- Query 搜索仍按顺序执行；独立 JD 详情提取采用最大并发数 5 的有界并行；
 - 严格 Past 24 hours 在漏跑后可能产生时间空洞；
 - 尚无生产级数量和运行时间 quota；
 - 尚无外部通知渠道；

@@ -49,4 +49,29 @@ with tempfile.TemporaryDirectory() as directory:
     assert result["jobs"][1]["next_action"] == "GENERATE_CV"
     assert (root / "output" / "123" / "screening-report.json").is_file()
 
+    policy_screening = json.loads(json.dumps(passing))
+    policy_screening["requirements"][0].update({
+        "hardness_basis": "candidate_policy",
+        "policy_evidence": {"policy_confirmation_id": "locations", "ledger_confirmation_id": "preference-locations", "screening_gate_id": "location-gate"},
+    })
+    policy = {
+        "candidate_id": "candidate-b",
+        "confirmation_items": [{"id": "locations", "status": "resolved", "answer": ["Berlin"]}],
+        "screening_gates": [{"id": "location-gate", "criterion": "Acceptable location", "confirmation_id": "locations", "ledger_confirmation_id": "preference-locations", "status": "active"}],
+    }
+    confirmations = {
+        "candidate_id": "candidate-b",
+        "as_of": "2026-07-25",
+        "confirmations": [{
+            "id": "preference-locations", "kind": "preference", "status": "active",
+            "answer": ["Berlin"],
+            "scope": {"profile_fact_ids": [], "policy_confirmation_ids": ["locations"], "screening_gate_ids": ["location-gate"]},
+        }],
+    }
+    from validate_case import artifact_fingerprint
+    policy["confirmation_ledger"] = {"fingerprint": artifact_fingerprint(confirmations)}
+    from validate_case import validate
+    assert validate(candidate, policy_screening, policy, confirmations) == []
+    assert any("requires policy and confirmation ledger" in error for error in validate(candidate, policy_screening))
+
 print("materialize_screening_batch tests passed")

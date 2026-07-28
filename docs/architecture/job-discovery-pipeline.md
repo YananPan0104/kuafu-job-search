@@ -25,9 +25,9 @@ The pipeline is not strictly linear. Discovery metrics may propose changes to th
 
 ## Skill A: candidate profile and search policy
 
-Skill A is implemented as `prepare-candidate-job-search`. It owns raw CV onboarding, the canonical evidence-linked candidate profile, and the reviewable search policy. Downstream skills read and validate the canonical profile but do not rebuild it.
+Skill A is implemented as `prepare-candidate-job-search`. It owns raw CV onboarding, the canonical evidence-linked candidate profile, the durable candidate confirmation ledger, and the reviewable search policy. Downstream skills read and validate these artifacts but do not rebuild them.
 
-Skill A maintains two distinct artifacts.
+Skill A maintains three distinct artifacts.
 
 ### `candidate-profile.json`
 
@@ -37,6 +37,10 @@ Store atomic, evidence-linked candidate facts such as education, experience, ski
 
 Store preferences and discovery controls such as role families, preferred domains, seniority, employment types, locations, negative preferences, and title-language handling.
 
+### `candidate-confirmations.json`
+
+Store durable candidate answers with their question, typed answer, timestamp, intake or migration provenance, lifecycle status, and explicit profile, policy, or screening scope. Conversation is an intake channel rather than the system of record. Search preferences do not become final screening gates unless an active scoped confirmation and resolved policy item explicitly authorize that use.
+
 Candidate language ability and title-language handling are different concepts. For example, `German: A2` is a candidate fact, while `skip high-confidence German titles` is a reversible search policy.
 
 Skill A does not encode LinkedIn Boolean syntax and does not control a browser.
@@ -44,6 +48,7 @@ Skill A does not encode LinkedIn Boolean syntax and does not control a browser.
 Implementation controls:
 
 - draft policies begin with explicit open preference questions;
+- resolved policy items link to active confirmation-ledger entries with matching answers;
 - every search target cites candidate fact IDs or resolved confirmation IDs;
 - a policy cannot become `confirmed` while a required confirmation is open;
 - candidate profile and policy IDs must match.
@@ -64,7 +69,7 @@ Generate multiple source-specific query statements from approved profile fields 
 
 Only `active` queries may run automatically. Approval of a structured Skill A search target also authorizes its deterministic compiled query, so a confirmed policy's approved targets generate `active` queries without a duplicate activation gate. Proposed targets and targets in draft policies generate `draft` queries. Scheduled executions must not silently rewrite active queries.
 
-The Collector compiles structured Skill A search targets into LinkedIn Boolean statements with `generate_query_portfolio.py`. If must-groups, exclusions, or target-level filters change, the target returns to `proposed` and must be reviewed again. Before browser execution, `validate_discovery_inputs.py` requires matching candidate IDs, profile and policy source versions, a confirmed policy for active queries, and no required open confirmations.
+The Collector compiles structured Skill A search targets into LinkedIn Boolean statements with `generate_query_portfolio.py`. If must-groups, exclusions, or target-level filters change, the target returns to `proposed` and must be reviewed again. Before browser execution, `validate_discovery_inputs.py` requires matching candidate IDs, profile and policy source versions, confirmation-ledger fingerprint and links when referenced, a confirmed policy for active queries, and no required open confirmations.
 
 ### 2. Browser execution
 
@@ -89,7 +94,7 @@ Never erase skipped jobs. Preserve job ID, title, company, URL, query provenance
 
 ### 4. JD extraction
 
-For forwarded jobs, prefer LinkedIn's search split pane: use a job ID collected from a visible result card in the search page's `currentJobId` URL state, then verify the selected title and visible `About the job` heading before extracting the description. This keeps card collection and detail extraction in one authenticated page and avoids mutable tracking links, pointer-click delays, and the delayed rendering observed on independent job pages. Use an exact card click and then an independent `/jobs/view/<id>/` page only as bounded fallbacks.
+For forwarded jobs, use job IDs collected from visible result cards to open canonical `/jobs/view/<id>/` pages in independent tabs. Extract details with settled-result semantics and a hard maximum concurrency of five, verify the job ID, expected title, and supported description heading, and checkpoint each attempt immediately. Use same-page `currentJobId` navigation and exact-card selection only as bounded per-job fallbacks.
 
 Normalize the complete visible JD to schema.org `JobPosting` JSON plus readable Markdown. Cache by LinkedIn job ID and content hash. Re-read a known job only when its content changes or the user requests a refresh.
 
@@ -98,11 +103,12 @@ Normalize the complete visible JD to schema.org `JobPosting` JSON plus readable 
 `tailor-job-application` consumes:
 
 - the versioned candidate profile from Skill A;
+- the candidate confirmation ledger and confirmed search policy when candidate statements or candidate-side gates affect screening;
 - one normalized JobPosting from Skill B, or an equivalent PDF, URL, or pasted JD.
 
 It automatically screens every retrieved or cached JD, applies `PASS`, `HOLD`, or `FAIL`, and automatically generates an evidence-bound CV for `PASS` or explicitly `OVERRIDDEN` jobs. There is no confirmation gate between validated JD extraction and screening, or between `PASS` and CV generation.
 
-Skill C must reuse the canonical valid candidate profile. A missing, stale, conflicting, or fingerprint-mismatched profile returns to `prepare-candidate-job-search`; Skill C must not silently rebuild it. It must not contain LinkedIn DOM or query-generation logic.
+Skill C must reuse the canonical valid candidate profile, ledger, and policy. Missing, stale, conflicting, or fingerprint-mismatched candidate artifacts return to `prepare-candidate-job-search`; Skill C must not silently rebuild them. A candidate-side hard gate uses `hardness_basis: candidate_policy` and cites both the resolved policy item and active scoped ledger confirmation. Skill C must not contain LinkedIn DOM or query-generation logic.
 
 ## End-to-end gates
 
@@ -191,7 +197,7 @@ The manual daily operating mode intentionally accepts the following limitations 
 - no end-to-end durable state machine or automatic resume across every pipeline stage;
 - incomplete transaction atomicity across query collection, screening, and document generation;
 - no workspace lock beyond the operating rule that only one run is started at a time;
-- sequential query and JD processing, with no parallel execution optimization;
+- query searches remain sequential, while independent JD detail extraction is bounded to a maximum concurrency of five;
 - a strict Past 24 hours window may miss postings after a skipped or failed run unless a broader recovery run is requested;
 - no production quota or runtime-budget enforcement; accepted for MVP because expected daily eligible volume is low;
 - no external notification channel; completion, `HOLD`, and error results remain in the active Codex task and local artifacts;

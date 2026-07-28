@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import copy
+from candidate_confirmations import link_policy, migrated_ledger
 from candidate_search_policy import build_draft, profile_fingerprint, validate_policy, validate_profile
 
 
@@ -42,6 +43,18 @@ confirmed["search_targets"] = [{
     "status": "approved",
 }]
 assert validate_policy(PROFILE, confirmed)["policy_status"] == "confirmed"
+
+ledger = migrated_ledger(PROFILE, confirmed, "2026-07-25")
+linked = link_policy(confirmed, ledger)
+assert validate_policy(PROFILE, linked, ledger)["policy_status"] == "confirmed"
+
+changed_answer = copy.deepcopy(linked)
+changed_answer["confirmation_items"][0]["answer"] = "different"
+try:
+    validate_policy(PROFILE, changed_answer, ledger)
+    raise AssertionError("ledger answer mismatch should fail")
+except ValueError as error:
+    assert "differs from the confirmation ledger" in str(error)
 
 mismatch = copy.deepcopy(confirmed)
 mismatch["candidate_id"] = "candidate-a"

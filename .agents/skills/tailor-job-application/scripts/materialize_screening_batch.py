@@ -49,10 +49,12 @@ def screening_markdown(job: dict, screening: dict) -> str:
     )
 
 
-def materialize(candidate_path: Path, manifest_path: Path, assessments_path: Path, output_dir: Path) -> dict:
+def materialize(candidate_path: Path, manifest_path: Path, assessments_path: Path, output_dir: Path, policy_path: Path | None = None, confirmations_path: Path | None = None) -> dict:
     candidate = load_json(candidate_path)
     manifest = load_json(manifest_path)
     assessments = load_json(assessments_path)
+    policy = load_json(policy_path) if policy_path else None
+    confirmations = load_json(confirmations_path) if confirmations_path else None
     if assessments.get("candidate_id") != candidate.get("candidate_id"):
         raise ValueError("assessment candidate_id does not match candidate profile")
     if assessments.get("source_run_id") != manifest.get("run_id"):
@@ -79,7 +81,7 @@ def materialize(candidate_path: Path, manifest_path: Path, assessments_path: Pat
         screening = item.get("screening")
         if not isinstance(screening, dict):
             raise ValueError(f"assessment[{index}] screening must be an object")
-        errors = validate(candidate, screening)
+        errors = validate(candidate, screening, policy, confirmations)
         if errors:
             raise ValueError(f"assessment[{index}] is invalid: {'; '.join(errors)}")
         if job_id not in screening.get("case_id", ""):
@@ -128,6 +130,11 @@ def materialize(candidate_path: Path, manifest_path: Path, assessments_path: Pat
         "candidate_id": candidate["candidate_id"],
         "candidate_profile_as_of": candidate["as_of"],
         "candidate_profile_fingerprint": profile_fingerprint(candidate),
+        "confirmation_ledger": (
+            {"path": str(confirmations_path), "as_of": confirmations.get("as_of")}
+            if confirmations_path and confirmations
+            else None
+        ),
         "source_run_id": manifest["run_id"],
         "mode": "screen_and_advance",
         "application_generation": bool(application_candidates),
@@ -146,8 +153,10 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--assessments", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--policy", type=Path)
+    parser.add_argument("--confirmations", type=Path)
     args = parser.parse_args()
-    result = materialize(args.candidate, args.manifest, args.assessments, args.output)
+    result = materialize(args.candidate, args.manifest, args.assessments, args.output, args.policy, args.confirmations)
     print(json.dumps({"batch_id": result["batch_id"], "jobs": len(result["jobs"]), "gate_counts": result["gate_counts"], "valid": True}, ensure_ascii=False))
 
 

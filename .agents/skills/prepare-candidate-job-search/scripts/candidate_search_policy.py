@@ -9,6 +9,9 @@ import json
 from datetime import date
 from pathlib import Path
 
+from candidate_confirmations import fingerprint as confirmation_fingerprint
+from candidate_confirmations import validate_ledger
+
 
 PROFILE_KEYS = {"schema_version", "candidate_id", "as_of", "facts", "conflicts", "unverified_claims"}
 FACT_STATUSES = {"verified", "source_claimed", "needs_confirmation", "expired"}
@@ -110,6 +113,7 @@ def build_draft(profile: dict, as_of: str | None = None) -> dict:
             "skip_by_title_signals": [],
             "review_if_time_signals": [],
         },
+        "screening_gates": [],
         "search_targets": [],
         "confirmation_items": [
             {"id": "search-locations", "question": "Which locations and remote arrangements are acceptable?", "required": True, "status": "open", "answer": None},
@@ -121,7 +125,7 @@ def build_draft(profile: dict, as_of: str | None = None) -> dict:
     }
 
 
-def validate_policy(profile: dict, policy: dict) -> dict:
+def validate_policy(profile: dict, policy: dict, confirmations: dict | None = None) -> dict:
     facts = validate_profile(profile)
     require_keys(
         policy,
@@ -142,6 +146,11 @@ def validate_policy(profile: dict, policy: dict) -> dict:
     confirmation_ids: set[str] = set()
     open_required = []
     resolved_ids = set()
+    ledger_ids = {
+        str(item["id"]): item
+        for item in (confirmations or {}).get("confirmations", [])
+        if item.get("status") == "active"
+    }
     for index, item in enumerate(policy["confirmation_items"]):
         require_keys(item, {"id", "question", "required", "status", "answer"}, f"confirmation_items[{index}]")
         if item["id"] in confirmation_ids:
@@ -151,6 +160,15 @@ def validate_policy(profile: dict, policy: dict) -> dict:
             raise ValueError(f"confirmation_items[{index}] has invalid status")
         if item["status"] == "resolved":
             resolved_ids.add(item["id"])
+            ledger_id = item.get("ledger_confirmation_id")
+            if confirmations is not None:
+                if not ledger_id or ledger_id not in ledger_ids:
+                    raise ValueError(f"confirmation_items[{index}] is resolved but lacks an active ledger confirmation")
+                ledger_item = ledger_ids[ledger_id]
+                if item["id"] not in ledger_item["scope"]["policy_confirmation_ids"]:
+                    raise ValueError(f"confirmation_items[{index}] ledger scope does not reference the policy item")
+                if ledger_item["answer"] != item["answer"]:
+                    raise ValueError(f"confirmation_items[{index}] answer differs from the confirmation ledger")
         if item["required"] and item["status"] == "open":
             open_required.append(item["id"])
 
@@ -186,6 +204,33 @@ def validate_policy(profile: dict, policy: dict) -> dict:
         if active_targets == 0:
             raise ValueError("confirmed policy requires at least one non-retired search target")
 
+    screening_gate_ids = set()
+    for index, gate in enumerate(policy.get("screening_gates", [])):
+        require_keys(gate, {"id", "criterion", "confirmation_id", "ledger_confirmation_id", "status"}, f"screening_gates[{index}]")
+        gate_id = str(gate["id"])
+        if not gate_id or gate_id in screening_gate_ids:
+            raise ValueError(f"screening_gates[{index}] has an empty or duplicate id")
+        screening_gate_ids.add(gate_id)
+        if gate["status"] not in {"active", "retired"}:
+            raise ValueError(f"screening_gates[{index}] has invalid status")
+        policy_confirmation = next((item for item in policy["confirmation_items"] if item["id"] == gate["confirmation_id"]), None)
+        if gate["status"] == "active" and (not policy_confirmation or policy_confirmation["status"] != "resolved"):
+            raise ValueError(f"screening_gates[{index}] requires a resolved policy confirmation")
+        if confirmations is not None and gate["status"] == "active":
+            ledger_item = ledger_ids.get(str(gate["ledger_confirmation_id"]))
+            if not ledger_item or gate_id not in ledger_item["scope"]["screening_gate_ids"]:
+                raise ValueError(f"screening_gates[{index}] lacks an active scoped ledger confirmation")
+
+    ledger_ref = policy.get("confirmation_ledger")
+    if ledger_ref:
+        if confirmations is None:
+            raise ValueError("policy references a confirmation ledger but none was supplied")
+        validate_ledger(confirmations, profile, policy)
+        if str(ledger_ref.get("candidate_id")) != str(profile["candidate_id"]):
+            raise ValueError("policy confirmation_ledger candidate_id does not match candidate profile")
+        if ledger_ref.get("fingerprint") != confirmation_fingerprint(confirmations):
+            raise ValueError("policy confirmation_ledger fingerprint does not match confirmation ledger")
+
     return {
         "candidate_id": profile["candidate_id"],
         "policy_status": policy["status"],
@@ -205,6 +250,7 @@ def main() -> None:
     validate = sub.add_parser("validate")
     validate.add_argument("--profile", type=Path, required=True)
     validate.add_argument("--policy", type=Path, required=True)
+    validate.add_argument("--confirmations", type=Path)
     validate_profile_command = sub.add_parser("validate-profile")
     validate_profile_command.add_argument("--profile", type=Path, required=True)
     args = parser.parse_args()
@@ -219,7 +265,9 @@ def main() -> None:
         args.output.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(json.dumps({"candidate_id": output["candidate_id"], "status": "draft", "output": str(args.output)}, ensure_ascii=False))
     else:
-        print(json.dumps(validate_policy(profile, load_json(args.policy)), ensure_ascii=False))
+        policy = load_json(args.policy)
+        confirmations = load_json(args.confirmations) if args.confirmations else None
+        print(json.dumps(validate_policy(profile, policy, confirmations), ensure_ascii=False))
 
 
 if __name__ == "__main__":

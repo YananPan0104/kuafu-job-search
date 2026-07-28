@@ -3,7 +3,7 @@
 import copy
 
 from generate_query_portfolio import generate_portfolio, profile_fingerprint
-from validate_discovery_inputs import validate_inputs
+from validate_discovery_inputs import artifact_fingerprint, validate_inputs
 
 
 PROFILE = {
@@ -78,6 +78,23 @@ confirmed_policy["search_targets"][0]["status"] = "approved"
 confirmed_portfolio = generate_portfolio(PROFILE, confirmed_policy)
 assert confirmed_portfolio["queries"][0]["status"] == "active"
 assert validate_inputs(PROFILE, confirmed_policy, confirmed_portfolio)["active_queries"] == 1
+
+ledger = {
+    "candidate_id": "candidate-b",
+    "confirmations": [{
+        "id": "preference-role-targets", "status": "active", "answer": "approved",
+        "scope": {"policy_confirmation_ids": ["role-targets"]},
+    }],
+}
+ledger_policy = copy.deepcopy(confirmed_policy)
+ledger_policy["confirmation_items"][0]["ledger_confirmation_id"] = "preference-role-targets"
+ledger_policy["confirmation_ledger"] = {"fingerprint": artifact_fingerprint(ledger)}
+assert validate_inputs(PROFILE, ledger_policy, confirmed_portfolio, ledger)["active_queries"] == 1
+try:
+    validate_inputs(PROFILE, ledger_policy, confirmed_portfolio)
+    raise AssertionError("referenced confirmation ledger must be supplied")
+except ValueError as error:
+    assert "none was supplied" in str(error)
 
 mismatch = copy.deepcopy(portfolio)
 mismatch["candidate_id"] = "candidate-a"

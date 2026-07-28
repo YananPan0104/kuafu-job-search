@@ -6,6 +6,12 @@ Require `schema_version`, `candidate_id`, `as_of`, `facts`, `conflicts`, and `un
 
 Use the canonical profile produced by `prepare-candidate-job-search`. Preserve its candidate ID, version or `as_of` value, fingerprint, evidence sources, conflicts, and unverified claims. Do not silently replace or rebuild it. A provenance mismatch returns to profile revision.
 
+## Candidate confirmations and policy
+
+Load the candidate-local `candidate-confirmations.json` and confirmed `job-search-policy.json` when a candidate statement or preference affects screening. Require matching candidate IDs and the ledger fingerprint recorded by the policy. Use active ledger entries only.
+
+Search preferences are not screening gates by default. A candidate-side screening requirement must use `hardness_basis: candidate_policy` and add `policy_evidence` containing `policy_confirmation_id`, `ledger_confirmation_id`, and `screening_gate_id`. The policy item must be resolved, the policy gate active, the ledger entry active, and its scope must include both the policy confirmation ID and screening gate ID.
+
 ## Discovery JobPosting input
 
 Accept a selected artifact from a validated `discover-linkedin-job-postings` run. Require schema.org `JobPosting` fields `@context`, `@type`, `title`, `hiringOrganization.name`, `description`, and `url`.
@@ -16,7 +22,7 @@ Record the discovery `run_id`, `job_id`, `query_ids`, canonical URL, collection 
 
 Require `schema_version`, `case_id`, `gate`, `underlying_gate`, `recommendation`, `requirements`, `blocking_questions`, and `override`.
 
-Each requirement requires `id`, `criterion`, `classification`, `hardness_basis`, `candidate_status`, `jd_evidence`, `candidate_evidence`, `confidence`, `reasoning`, and `follow_up_question`.
+Each requirement requires `id`, `criterion`, `classification`, `hardness_basis`, `candidate_status`, `jd_evidence`, `candidate_evidence`, `confidence`, `reasoning`, and `follow_up_question`. A `candidate_policy` requirement additionally requires `policy_evidence`.
 
 Valid classifications are `hard`, `soft`, and `learnable`. Valid candidate statuses are `met`, `partial`, `unmet`, and `unknown`.
 

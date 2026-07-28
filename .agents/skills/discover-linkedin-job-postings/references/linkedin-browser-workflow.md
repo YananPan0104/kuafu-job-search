@@ -30,19 +30,30 @@ LinkedIn may append additional cards after the first next-page action and later 
 
 ## Detail collection
 
-Open only `FORWARD` and configured `MANUAL_REVIEW` jobs. Prefer `navigateAndExtractSplitPane` from `scripts/linkedin_split_pane_adapter.mjs`: add the discovered job ID to the same search URL as `currentJobId`, navigate, and verify the expected title plus the visible `About the job` heading before extraction. This uses LinkedIn's user-visible search-page state and avoids mutable tracking links and pointer-click delays. Never use an ID that was not collected from a visible result card.
+Open only `FORWARD` and configured `MANUAL_REVIEW` jobs. Use `extractJobDetailsInParallel` from `scripts/linkedin_split_pane_adapter.mjs` as the primary detail path. It opens canonical `/jobs/view/<discovered-id>/` pages in independent tabs, with a default and hard maximum concurrency of 5. Never use an ID that was not collected from a visible result card.
 
-Use `selectAndExtractSplitPane` as the first fallback: snapshot the page, verify the captured card identity, click a unique accessible title or job-ID link, take a fresh snapshot, and verify the resulting detail pane. Extract only the selected job header and complete description area rather than repeatedly processing the full page.
+For each direct-detail tab:
 
-Treat selection verification as mandatory. If the exact link is absent or non-unique, record a warning and do not guess by card position. A failed same-page selection may use one bounded direct-page attempt as fallback.
+1. Verify the canonical URL contains the discovered job ID and the expected title is visible.
+2. Accept `About the job`, `Über den Job`, or `Infos zur Stelle` as the description heading.
+3. When the description is not initially visible, scroll once to trigger lazy rendering.
+4. Use bounded condition checks after 500 ms, 1 second, and 2 seconds rather than one immediate fixed-time decision.
+5. Extract and checkpoint the result as soon as that job settles; do not wait for the full parallel batch before persisting it.
+6. Close the job's temporary tab after its checkpoint callback completes.
 
-For a direct `/jobs/view/<id>/` page, use staged rendering: observe the header, scroll once to the description region, then verify the visible `About the job` heading. When it is still absent, allow one short delayed-render fallback followed by one fresh verification. Record `retrieval_failed` after that bounded fallback; do not loop until the description appears.
+Use `Promise.allSettled` semantics so one failed job does not discard other results. Reject configurations above concurrency 5. Stop assigning new jobs when any worker detects login expiry or an access challenge.
+
+Use `navigateAndExtractSplitPane` as the first per-job fallback: add the discovered job ID to the original search URL as `currentJobId`, navigate, and verify the expected title plus the visible description heading. Use `selectAndExtractSplitPane` as the second fallback: return to the search page, verify the captured card identity, and click a unique accessible title or job-ID link.
+
+Treat selection verification as mandatory. If the exact link is absent or non-unique, record a warning and do not guess by card position. After the two bounded same-page fallbacks fail, record `retrieval_failed`; do not loop back into repeated direct-page attempts.
+
+For a direct `/jobs/view/<id>/` page, use staged rendering: observe the header, scroll once to the description region, then verify a supported description heading. When it is still absent, use only the bounded 500 ms, 1 second, and 2 second condition checks. Record `retrieval_failed` after that schedule; do not loop until the description appears.
 
 Record incomplete text, collapsed sections, external redirects, missing company, and missing location as warnings. Do not treat an incomplete extraction as a hard-gate failure.
 
 Persist each detail attempt immediately, keyed by LinkedIn job ID. For a failed attempt, preserve the discovered card, captured source URL, canonical job URL, extraction warnings, and any partial description. A batch controller must resume from this checkpoint and skip already retrieved IDs. Do not keep the only copy of completed descriptions or failed-job review links in an in-memory loop that can fail on a later navigation.
 
-If search-page navigation becomes unavailable after cards have already been collected, one bounded direct `/jobs/view/<discovered-id>/` attempt per remaining card is allowed. Record `DIRECT_PAGE_FALLBACK_USED` and retain the original query provenance. This fallback never authorizes guessing or enumerating job IDs.
+If direct-detail navigation becomes unavailable after cards have already been collected, retain the original card and query provenance and use only the bounded same-page fallbacks above. This never authorizes guessing or enumerating job IDs.
 
 ## Run completion
 
