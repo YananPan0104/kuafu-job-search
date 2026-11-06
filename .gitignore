@@ -1,6 +1,9 @@
 # Candidate-specific and generated runtime data
 /cases/
 /discovery/
+/screening/
+/staging/
+/tmp/
 /PROJECT_STATUS.md
 
 # Non-canonical development copies and local validation helpers

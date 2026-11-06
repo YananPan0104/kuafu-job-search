@@ -89,6 +89,22 @@ try {
   });
   assert.equal(preflight.status, "AUTHENTICATED");
 
+  let delayedSnapshots = 0;
+  const preflightWaits = [];
+  const delayedPreflight = await runLinkedInPreflight({
+    openTab: async () => ({
+      goto: async () => {},
+      url: () => "https://www.linkedin.com/jobs/",
+      snapshot: async () => {
+        delayedSnapshots += 1;
+        return delayedSnapshots === 5 ? "Jobs My Network Messaging" : "Loading";
+      },
+      playwright: { waitForTimeout: async (milliseconds) => preflightWaits.push(milliseconds) },
+    }),
+  });
+  assert.equal(delayedPreflight.status, "AUTHENTICATED");
+  assert.deepEqual(preflightWaits, [1000, 2000, 3000, 4000]);
+
   let adapterClosed = false;
   let chromeStopped = false;
   const coordinated = await executeBrowserPreflight({

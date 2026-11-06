@@ -40,9 +40,23 @@ export async function runLinkedInPreflight(browser, options = {}) {
   const jobsUrl = options.jobsUrl ?? "https://www.linkedin.com/jobs/";
   const tab = await browser.openTab(jobsUrl);
   if (typeof tab.goto === "function") await tab.goto(jobsUrl);
-  const result = classifyLinkedInPage({
-    url: await currentUrl(tab),
-    snapshot: await visibleSnapshot(tab),
+  let latest;
+  const poll = await pollUntilLoaded({
+    check: async () => {
+      latest = classifyLinkedInPage({
+        url: await currentUrl(tab),
+        snapshot: await visibleSnapshot(tab),
+      });
+      return latest.status === "DOM_DRIFT" ? null : latest;
+    },
+    wait: async (milliseconds) => {
+      if (typeof tab.playwright?.waitForTimeout === "function") {
+        await tab.playwright.waitForTimeout(milliseconds);
+      }
+    },
+    scheduleMs: LOAD_CHECK_SCHEDULE_MS,
   });
+  const result = poll.loaded ? poll.value : latest;
   return { ...result, checked_at: new Date().toISOString() };
 }
+import { LOAD_CHECK_SCHEDULE_MS, pollUntilLoaded } from "../../../.agents/skills/discover-linkedin-job-postings/scripts/loading_policy.mjs";

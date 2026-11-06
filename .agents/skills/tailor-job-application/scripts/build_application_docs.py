@@ -9,6 +9,7 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.table import WD_ALIGN_VERTICAL, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -113,8 +114,11 @@ def configure_cv_styles(doc: Document) -> None:
     bullet._element.rPr.rFonts.set(qn("w:ascii"), font)
     bullet._element.rPr.rFonts.set(qn("w:hAnsi"), font)
     bullet.font.size = Pt(9.2)
-    bullet.paragraph_format.left_indent = Cm(0.42)
-    bullet.paragraph_format.first_line_indent = Cm(-0.22)
+    # Keep bullets visibly separated from the role heading and body text.
+    # A larger hanging indent avoids the cramped first two experience blocks
+    # that can result when long bullets wrap across several lines.
+    bullet.paragraph_format.left_indent = Cm(0.62)
+    bullet.paragraph_format.first_line_indent = Cm(-0.32)
     bullet.paragraph_format.space_after = Pt(0.8)
     bullet.paragraph_format.line_spacing = 1.02
 
@@ -155,32 +159,129 @@ def add_cv_labeled_line(doc: Document, label: str, value: str) -> None:
     set_font(paragraph.add_run(value), "Arial", size=9.2)
 
 
+def add_cv_project(doc: Document, item: dict) -> None:
+    require(item, {"title", "bullets"}, "cv project item")
+    paragraph = doc.add_paragraph(style="Role")
+    set_font(paragraph.add_run(item["title"]), "Arial", size=9.8, bold=True)
+    context = item.get("context")
+    dates = item.get("dates")
+    suffix = " | ".join(value for value in (context, dates) if value)
+    if suffix:
+        set_font(paragraph.add_run(f" | {suffix}"), "Arial", size=9.3, color=MUTED)
+    for bullet in item["bullets"]:
+        add_cv_bullet(doc, bullet)
+
+
+def resolve_cv_photo(candidate: dict, case_dir: Path) -> Path | None:
+    configured = candidate.get("cv_photo_path")
+    if configured:
+        path = Path(configured)
+        resolved = path if path.is_absolute() else (case_dir / path).resolve()
+        if not resolved.is_file():
+            raise FileNotFoundError(f"Configured CV photo does not exist: {resolved}")
+        return resolved
+
+    if len(case_dir.parents) < 2:
+        return None
+    profile_dir = case_dir.parents[1] / "discovery" / candidate["slug"]
+    profile_path = profile_dir / "candidate-profile.json"
+    if not profile_path.is_file():
+        return None
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    for fact in profile.get("facts", []):
+        if fact.get("id") != "document.cv_photo" or fact.get("status") != "verified":
+            continue
+        value = fact.get("value")
+        if not isinstance(value, dict) or not value.get("enabled"):
+            return None
+        asset = value.get("asset")
+        if not isinstance(asset, str) or not asset:
+            raise ValueError("document.cv_photo must define a non-empty asset path")
+        resolved = (profile_dir / asset).resolve()
+        if not resolved.is_file():
+            raise FileNotFoundError(f"Profile CV photo does not exist: {resolved}")
+        return resolved
+    return None
+
+
+def remove_table_borders(table) -> None:
+    tbl_pr = table._tbl.tblPr
+    borders = tbl_pr.find(qn("w:tblBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tblBorders")
+        tbl_pr.append(borders)
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        element = OxmlElement(f"w:{edge}")
+        element.set(qn("w:val"), "nil")
+        borders.append(element)
+
+
+def add_cv_identity(doc: Document, candidate: dict, cv: dict, photo_path: Path | None) -> None:
+    if photo_path is None:
+        name = doc.add_paragraph()
+        name.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        name.paragraph_format.space_after = Pt(0)
+        set_font(name.add_run(candidate["name"]), "Arial", size=20, bold=True, color=RGBColor(0, 0, 0))
+
+        headline = doc.add_paragraph()
+        headline.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        headline.paragraph_format.space_after = Pt(2)
+        set_font(headline.add_run(cv["headline"]), "Arial", size=10.4, bold=True, color=ACCENT)
+
+        contact = doc.add_paragraph()
+        contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        contact.paragraph_format.space_after = Pt(5)
+        contact_text = " | ".join([candidate["location"], candidate["phone"], candidate["email"]])
+        set_font(contact.add_run(contact_text), "Arial", size=8.9, color=MUTED)
+
+        authorization = doc.add_paragraph()
+        authorization.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        authorization.paragraph_format.space_after = Pt(3)
+        set_font(authorization.add_run(" | ".join(candidate["work_authorization"])), "Arial", size=8.8, color=MUTED)
+        return
+
+    table = doc.add_table(rows=1, cols=2)
+    table.alignment = WD_TABLE_ALIGNMENT.LEFT
+    table.autofit = False
+    remove_table_borders(table)
+    table.columns[0].width = Cm(2.75)
+    table.columns[1].width = Cm(15.05)
+    photo_cell, text_cell = table.rows[0].cells
+    photo_cell.width = Cm(2.75)
+    text_cell.width = Cm(15.05)
+    photo_cell.vertical_alignment = WD_ALIGN_VERTICAL.TOP
+    text_cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+
+    photo_paragraph = photo_cell.paragraphs[0]
+    photo_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    photo_paragraph.paragraph_format.space_after = Pt(0)
+    photo_paragraph.add_run().add_picture(str(photo_path), width=Cm(2.35))
+
+    name = text_cell.paragraphs[0]
+    name.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    name.paragraph_format.space_after = Pt(0)
+    set_font(name.add_run(candidate["name"]), "Arial", size=20, bold=True, color=RGBColor(0, 0, 0))
+
+    headline = text_cell.add_paragraph()
+    headline.paragraph_format.space_after = Pt(3)
+    set_font(headline.add_run(cv["headline"]), "Arial", size=10.4, bold=True, color=ACCENT)
+
+    contact = text_cell.add_paragraph()
+    contact.paragraph_format.space_after = Pt(2)
+    contact_text = " | ".join([candidate["location"], candidate["phone"], candidate["email"]])
+    set_font(contact.add_run(contact_text), "Arial", size=8.9, color=MUTED)
+
+    authorization = text_cell.add_paragraph()
+    authorization.paragraph_format.space_after = Pt(0)
+    set_font(authorization.add_run(" | ".join(candidate["work_authorization"])), "Arial", size=8.8, color=MUTED)
+
+
 def build_cv(config: dict, case_dir: Path, output_override: Path | None = None) -> Path:
     candidate = config["candidate"]
     cv = config["cv"]
     doc = Document()
     configure_cv_styles(doc)
-
-    name = doc.add_paragraph()
-    name.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    name.paragraph_format.space_after = Pt(0)
-    set_font(name.add_run(candidate["name"]), "Arial", size=20, bold=True, color=RGBColor(0, 0, 0))
-
-    headline = doc.add_paragraph()
-    headline.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    headline.paragraph_format.space_after = Pt(2)
-    set_font(headline.add_run(cv["headline"]), "Arial", size=10.4, bold=True, color=ACCENT)
-
-    contact = doc.add_paragraph()
-    contact.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    contact.paragraph_format.space_after = Pt(5)
-    contact_text = " | ".join([candidate["location"], candidate["phone"], candidate["email"]])
-    set_font(contact.add_run(contact_text), "Arial", size=8.9, color=MUTED)
-
-    authorization = doc.add_paragraph()
-    authorization.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    authorization.paragraph_format.space_after = Pt(3)
-    set_font(authorization.add_run(" | ".join(candidate["work_authorization"])), "Arial", size=8.8, color=MUTED)
+    add_cv_identity(doc, candidate, cv, resolve_cv_photo(candidate, case_dir))
 
     add_cv_section(doc, "Professional Summary")
     summary = doc.add_paragraph()
@@ -200,6 +301,11 @@ def build_cv(config: dict, case_dir: Path, output_override: Path | None = None) 
         add_cv_role(doc, {"title": item["degree"], "organization": item["institution"], "dates": item["dates"]})
         if item.get("details"):
             add_cv_labeled_line(doc, item.get("details_label", "Selected coursework"), item["details"])
+
+    if cv.get("projects"):
+        add_cv_section(doc, cv.get("projects_section_title", "Selected Projects"))
+        for item in cv["projects"]:
+            add_cv_project(doc, item)
 
     add_cv_section(doc, "Skills")
     for group in cv["skills"]:

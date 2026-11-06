@@ -37,7 +37,6 @@ with tempfile.TemporaryDirectory() as temp_dir:
                     "date_posted": "Past 24 hours",
                     "employment_type": ["Full-time"],
                     "experience_level": ["Entry level"],
-                    "sort_by": "Most recent",
                 },
             }
         ],
@@ -97,13 +96,24 @@ with tempfile.TemporaryDirectory() as temp_dir:
                 "requested": portfolio["queries"][0]["filters"],
                 "observed": {
                     "date_posted_visible": True,
-                    "sort_by_visible": True,
+                    "ranking_mode": "semantic_relevance",
+                    "sort_control_expected": False,
                 },
                 "ui_fallback_used": False,
                 "warnings": [],
             }
         },
         "warnings": [],
+        "query_progress": {
+            "Q1": {
+                "status": "completed",
+                "pages_observed": 3,
+                "unique_cards_collected": 3,
+                "stop_reason": "EXHAUSTED_RESULTS",
+            }
+        },
+        "stop_reason": "CHECKPOINT_CALLBACK_FAILED",
+        "extraction_stopped": True,
     }
     portfolio_path = root / "portfolio.json"
     policy_path = root / "policy.json"
@@ -129,10 +139,13 @@ with tempfile.TemporaryDirectory() as temp_dir:
 
     manifest_path = run_dir / "run-manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == "1.1"
+    assert manifest["schema_version"] == "1.2"
     assert manifest["metrics"]["retrieval_failed"] == 2
     assert next(job for job in manifest["jobs"] if job["job_id"] == "333333333")["collection_status"] == "not_requested"
     assert manifest["filter_verification"] == checkpoint["filter_verification"]
+    assert manifest["stop_reason"] == "CHECKPOINT_CALLBACK_FAILED"
+    assert manifest["extraction_stopped"] is True
+    assert manifest["query_progress"] == checkpoint["query_progress"]
     assert manifest["failed_jobs_review"] == {
         "json": "failed-jobs.json",
         "markdown": "failed-jobs.md",

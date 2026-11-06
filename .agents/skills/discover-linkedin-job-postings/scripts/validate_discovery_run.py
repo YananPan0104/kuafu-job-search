@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from pathlib import Path
 
 
@@ -46,6 +47,14 @@ def validate_jobposting(path: Path) -> None:
     for key in ("title", "description", "url"):
         if not isinstance(posting[key], str) or not posting[key].strip():
             raise ValueError(f"{path}: {key} must be a non-empty string")
+    if re.search(r"(?:\u2026|\.\.\.)?\s*(?:show more|see more|more|mehr anzeigen)\s*$", posting["description"], re.IGNORECASE):
+        raise ValueError(f"{path}: description retains a collapsed marker")
+    completeness = posting.get("discovery", {}).get("description_completeness")
+    if isinstance(completeness, str) and completeness.startswith("incomplete_"):
+        raise ValueError(f"{path}: extraction metadata reports an incomplete description")
+    expansion = posting.get("discovery", {}).get("description_expansion") or {}
+    if expansion.get("outcome") in {"failed", "ambiguous_control", "marker_without_control"}:
+        raise ValueError(f"{path}: description expansion was not verified")
 
 
 def resolve_run_artifact(run_dir: Path, relative_path: str, label: str) -> Path:
@@ -139,6 +148,19 @@ def validate_manifest(path: Path) -> dict:
 
     run_dir = path.parent
     requires_failed_review = str(manifest["schema_version"]) != "1.0"
+    requires_query_progress = str(manifest["schema_version"]) == "1.2"
+    if requires_query_progress:
+        require_keys(manifest, {"query_progress", "stop_reason", "extraction_stopped"}, "run manifest")
+        if not isinstance(manifest["query_progress"], dict):
+            raise ValueError("run manifest query_progress must be an object")
+        for query_id, progress in manifest["query_progress"].items():
+            if not isinstance(progress, dict):
+                raise ValueError(f"query_progress.{query_id} must be an object")
+            require_keys(
+                progress,
+                {"status", "pages_observed", "unique_cards_collected", "stop_reason"},
+                f"query_progress.{query_id}",
+            )
     seen_ids: set[str] = set()
     failed_ids: set[str] = set()
     counts = {

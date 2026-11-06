@@ -27,28 +27,51 @@ def profile_fingerprint(profile: dict) -> str:
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
 
 
-def linkedin_term(value: object) -> str:
-    term = str(value).strip()
-    if not term:
-        raise ValueError("query terms must be non-empty")
-    if any(operator in term.upper().split() for operator in ("AND", "OR", "NOT")):
-        raise ValueError(f"query term must not contain Boolean operators: {term}")
-    escaped = term.replace('"', '\\"')
-    return f'"{escaped}"' if any(character.isspace() for character in term) else escaped
+def natural_list(values: list[object]) -> str:
+    terms = [str(value).strip() for value in values if str(value).strip()]
+    if len(terms) < 2:
+        return terms[0] if terms else ""
+    return ", ".join(terms[:-1]) + f" or {terms[-1]}"
 
 
-def statement_for(target: dict) -> str:
-    groups = []
-    for group in target["must_groups"]:
-        terms = [linkedin_term(term) for term in group["terms"]]
-        if not terms:
-            raise ValueError(f"target {target['target_id']} contains an empty must group")
-        groups.append(f"({' OR '.join(terms)})")
-    statement = " AND ".join(groups)
-    excluded = [linkedin_term(term) for term in target.get("exclude_terms", [])]
-    if excluded:
-        statement += f" NOT ({' OR '.join(excluded)})"
-    return statement
+def smart_search_for(target: dict, filters: dict) -> dict:
+    """Compile positive intent only; LinkedIn AI search does not support exclusions."""
+    groups = target["must_groups"]
+    role_terms = natural_list(groups[0]["terms"])
+    context_terms = [term for group in groups[1:] for term in group["terms"]]
+    levels = [str(value).strip() for value in filters.get("experience_level", [])]
+    level_prefix = ""
+    if levels:
+        normalized_levels = [
+            "entry-level" if value.lower() == "entry level" else value.lower().replace(" level", "")
+            for value in levels
+        ]
+        level_prefix = natural_list(normalized_levels).capitalize() + " "
+    query = f"{level_prefix}{role_terms} roles"
+    location = str(filters.get("location", "")).strip()
+    if location:
+        query += f" in {location}"
+    if context_terms:
+        query += f" involving {natural_list(context_terms)}"
+    role_first = f"{level_prefix}{role_terms} roles" + (f" in {location}" if location else "")
+    responsibility_context = (
+        f"{level_prefix}roles" + (f" in {location}" if location else "")
+        + f" involving {natural_list([*groups[0]['terms'], *context_terms])}"
+    )
+    payload = {
+        "submitted_query": query,
+        "excluded_terms_supported": False,
+        "excluded_terms_deferred_to_triage": list(target.get("exclude_terms", [])),
+        "compiler_version": "smart-search-positive-intent-v1",
+        "smoke_variants": {
+            "role_first": role_first,
+            "role_context": query,
+            "responsibility_context": responsibility_context,
+        },
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    payload["query_fingerprint"] = f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+    return payload
 
 
 def generate_portfolio(profile: dict, policy: dict, run_profile: str | None = None) -> dict:
@@ -87,6 +110,8 @@ def generate_portfolio(profile: dict, policy: dict, run_profile: str | None = No
             **profile_config.get("filter_overrides", {}),
             **target.get("filters", {}),
         }
+        if "sort_by" in filters:
+            raise ValueError("Smart Search filters must not contain obsolete sort_by")
         query_status = (
             "active"
             if policy["status"] == "confirmed" and target["status"] == "approved"
@@ -95,7 +120,9 @@ def generate_portfolio(profile: dict, policy: dict, run_profile: str | None = No
         queries.append({
             "query_id": query_id,
             "purpose": target["purpose"],
-            "statement": statement_for(target),
+            "search_mode": "smart_natural_language",
+            "ranking_mode": "semantic_relevance",
+            "smart_search": smart_search_for(target, filters),
             "status": query_status,
             "filters": filters,
             "rationale": target["rationale"],

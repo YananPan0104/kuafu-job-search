@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import {
   buildActiveSearchPlan,
-  buildLinkedInSearchUrl,
+  buildSmartSearchBootstrapUrl,
   classifyJobCards,
   extractLinkedInJobId,
 } from "./linkedin_discovery.mjs";
@@ -11,28 +11,26 @@ import {
 const query = {
   query_id: "Q1",
   purpose: "Test",
-  statement: "\"business analyst\" AND finance",
+  search_mode: "smart_natural_language",
+  smart_search: { submitted_query: "Entry-level business analyst roles in finance" },
   status: "active",
   filters: {
     location: "Germany",
     date_posted: "Past week",
     employment_type: ["Full-time"],
     experience_level: ["Entry level", "Associate"],
-    sort_by: "Most relevant",
   },
 };
 
-const url = new URL(buildLinkedInSearchUrl(query));
+const url = new URL(buildSmartSearchBootstrapUrl(query));
 assert.equal(url.origin, "https://www.linkedin.com");
-assert.equal(url.pathname, "/jobs/search/");
-assert.equal(url.searchParams.get("keywords"), query.statement);
-assert.equal(url.searchParams.get("location"), "Germany");
-assert.equal(url.searchParams.get("f_TPR"), "r604800");
-assert.equal(url.searchParams.get("f_JT"), "F");
-assert.equal(url.searchParams.get("f_E"), "2,3");
-assert.equal(url.searchParams.get("sortBy"), "R");
+assert.equal(url.pathname, "/jobs/");
+assert.equal(url.searchParams.has("keywords"), false);
+assert.equal(url.search, "");
 
 assert.deepEqual(buildActiveSearchPlan({ queries: [query, { ...query, query_id: "Q2", status: "draft" }] }).map((item) => item.query_id), ["Q1"]);
+assert.equal(buildActiveSearchPlan({ queries: [query] })[0].submitted_query, query.smart_search.submitted_query);
+assert.equal(buildActiveSearchPlan({ queries: [{ ...query, ranking_mode: "semantic_relevance" }] })[0].ranking_mode, "semantic_relevance");
 assert.equal(extractLinkedInJobId("https://www.linkedin.com/jobs/view/123456789/?trackingId=x"), "123456789");
 
 const policy = {
@@ -63,6 +61,7 @@ const decisions = classifyJobCards([
   { job_id: "13", title: "Business Analyst Kundenselbstbedienung-Server" },
   { job_id: "14", title: "Berater SAP Finance Transformation (w/m/d)" },
   { job_id: "15", title: "Leiter Finance Transformation & Systems (w/m/d)" },
+  { job_id: "16", title: "Business Analyst", visible_status_markers: ["Reposted 3 hours ago"] },
 ], policy);
 
 assert.deepEqual(decisions.map((item) => item.first_level_decision), [
@@ -81,9 +80,12 @@ assert.deepEqual(decisions.map((item) => item.first_level_decision), [
   "SKIP_FIRST_LEVEL",
   "SKIP_FIRST_LEVEL",
   "SKIP_FIRST_LEVEL",
+  "SKIP_FIRST_LEVEL",
 ]);
 assert.deepEqual(decisions[1].reason_codes, ["GERMAN_TITLE_HIGH_CONFIDENCE"]);
 assert.deepEqual(decisions[3].reason_codes, ["EXPLICIT_TITLE_EXCLUSION"]);
+assert.deepEqual(decisions[15].reason_codes, ["REPOSTED_JOB"]);
+assert.deepEqual(decisions[15].matched_markers, ["Reposted 3 hours ago"]);
 assert.equal(classifyJobCards(
   [{ job_id: "legacy", title: "Business Analyst Firmenkunden" }],
   { title_language_policy: { de: { enabled: true, mode: "high_precision", action: "skip_detail" } } },

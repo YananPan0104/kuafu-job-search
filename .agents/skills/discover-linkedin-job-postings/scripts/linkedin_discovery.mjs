@@ -3,36 +3,6 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
-const DATE_POSTED_CODES = new Map([
-  ["any time", null],
-  ["past 24 hours", "r86400"],
-  ["past week", "r604800"],
-  ["past month", "r2592000"],
-]);
-
-const EMPLOYMENT_TYPE_CODES = new Map([
-  ["full-time", "F"],
-  ["part-time", "P"],
-  ["contract", "C"],
-  ["temporary", "T"],
-  ["volunteer", "V"],
-  ["internship", "I"],
-]);
-
-const EXPERIENCE_LEVEL_CODES = new Map([
-  ["internship", "1"],
-  ["entry level", "2"],
-  ["associate", "3"],
-  ["mid-senior level", "4"],
-  ["director", "5"],
-  ["executive", "6"],
-]);
-
-const SORT_CODES = new Map([
-  ["most relevant", "R"],
-  ["most recent", "DD"],
-]);
-
 const HIGH_PRECISION_GERMAN_MARKERS = [
   "im bereich",
   "mit schwerpunkt",
@@ -100,55 +70,11 @@ function requireNonEmpty(value, label) {
   return value.trim();
 }
 
-function codesFor(values, mapping, label) {
-  const result = [];
-  for (const value of values ?? []) {
-    const normalized = normalizeLabel(value);
-    if (!mapping.has(normalized)) {
-      throw new Error(`Unsupported ${label}: ${value}`);
-    }
-    const code = mapping.get(normalized);
-    if (code) result.push(code);
+export function buildSmartSearchBootstrapUrl(querySpec) {
+  if (querySpec.search_mode !== "smart_natural_language") {
+    throw new Error(`Unsupported search mode: ${querySpec.search_mode}`);
   }
-  return result;
-}
-
-export function buildLinkedInSearchUrl(querySpec) {
-  const statement = requireNonEmpty(querySpec.statement, "statement");
-  const filters = querySpec.filters ?? {};
-  const url = new URL("https://www.linkedin.com/jobs/search/");
-
-  url.searchParams.set("keywords", statement);
-  if (filters.location) url.searchParams.set("location", filters.location);
-
-  const dateLabel = normalizeLabel(filters.date_posted ?? "any time");
-  if (!DATE_POSTED_CODES.has(dateLabel)) {
-    throw new Error(`Unsupported date_posted: ${filters.date_posted}`);
-  }
-  const dateCode = DATE_POSTED_CODES.get(dateLabel);
-  if (dateCode) url.searchParams.set("f_TPR", dateCode);
-
-  const employmentCodes = codesFor(
-    filters.employment_type,
-    EMPLOYMENT_TYPE_CODES,
-    "employment type",
-  );
-  if (employmentCodes.length) url.searchParams.set("f_JT", employmentCodes.join(","));
-
-  const experienceCodes = codesFor(
-    filters.experience_level,
-    EXPERIENCE_LEVEL_CODES,
-    "experience level",
-  );
-  if (experienceCodes.length) url.searchParams.set("f_E", experienceCodes.join(","));
-
-  const sortLabel = normalizeLabel(filters.sort_by ?? "most relevant");
-  if (!SORT_CODES.has(sortLabel)) {
-    throw new Error(`Unsupported sort_by: ${filters.sort_by}`);
-  }
-  url.searchParams.set("sortBy", SORT_CODES.get(sortLabel));
-
-  return url.toString();
+  return "https://www.linkedin.com/jobs/";
 }
 
 export function buildActiveSearchPlan(portfolio) {
@@ -160,7 +86,12 @@ export function buildActiveSearchPlan(portfolio) {
     .map((query) => ({
       query_id: requireNonEmpty(query.query_id, "query_id"),
       purpose: requireNonEmpty(query.purpose, "purpose"),
-      url: buildLinkedInSearchUrl(query),
+      search_mode: query.search_mode,
+      ranking_mode: query.ranking_mode,
+      submitted_query: requireNonEmpty(query.smart_search?.submitted_query, "smart_search.submitted_query"),
+      query_fingerprint: query.smart_search?.query_fingerprint ?? null,
+      smoke_variants: query.smart_search?.smoke_variants ?? {},
+      url: buildSmartSearchBootstrapUrl(query),
       requested_filters: query.filters ?? {},
     }));
 }
@@ -198,6 +129,22 @@ function germanPolicy(policy) {
 
 export function classifyJobCard(card, policy = {}) {
   const title = normalizedTitle(card.title);
+  const statusMarkers = [
+    ...(card.visible_status_markers ?? []),
+    card.posting_status,
+    card.card_text,
+  ].filter(Boolean).map(String);
+  const repostMatches = statusMarkers.flatMap((value) =>
+    value.match(/\breposted\s+\d+\s+(?:minute|hour|day|week)s?\s+ago\b/ig) ?? []
+  );
+  if (repostMatches.length) {
+    return {
+      ...card,
+      first_level_decision: "SKIP_FIRST_LEVEL",
+      reason_codes: ["REPOSTED_JOB"],
+      matched_markers: [...new Set(repostMatches)],
+    };
+  }
   const explicitSkips = policy.metadata_triage?.skip_by_title_signals ?? [];
   const explicitMatches = matchedMarkers(title, explicitSkips);
 
@@ -257,10 +204,6 @@ async function loadJson(path) {
 
 async function main(argv) {
   const [command, ...args] = argv;
-  if (command === "build-url" && args.length === 1) {
-    process.stdout.write(`${buildLinkedInSearchUrl(await loadJson(args[0]))}\n`);
-    return;
-  }
   if (command === "build-portfolio" && args.length === 1) {
     const output = buildActiveSearchPlan(await loadJson(args[0]));
     process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
@@ -272,7 +215,7 @@ async function main(argv) {
     return;
   }
   throw new Error(
-    "Usage: linkedin_discovery.mjs build-url <query-spec.json> | build-portfolio <query-portfolio.json> | classify <cards.json> <policy.json>",
+    "Usage: linkedin_discovery.mjs build-portfolio <query-portfolio.json> | classify <cards.json> <policy.json>",
   );
 }
 

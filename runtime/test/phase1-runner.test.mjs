@@ -14,14 +14,14 @@ import { executeDailyPreflight } from "../src/cli/daily-runner.mjs";
 const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "kuafu-phase1-"));
 
 try {
-  assert.equal(buildDailyRunId("yanan-pan", "2026-07-29", 1), "2026-07-29-daily-01");
-  assert.equal(buildDailyRunId("yanan-pan", "2026-07-29", 12), "2026-07-29-daily-12");
-  assert.throws(() => buildDailyRunId("yanan-pan", "29-07-2026", 1), /YYYY-MM-DD/);
+  assert.equal(buildDailyRunId("candidate-example", "2026-07-29", 1), "2026-07-29-daily-01");
+  assert.equal(buildDailyRunId("candidate-example", "2026-07-29", 12), "2026-07-29-daily-12");
+  assert.throws(() => buildDailyRunId("candidate-example", "29-07-2026", 1), /YYYY-MM-DD/);
   assert.equal(validateRunId("2026-07-29-daily-01"), "2026-07-29-daily-01");
   assert.throws(() => validateRunId("../../outside"), /safe filename/);
 
   const fingerprintA = buildTriggerFingerprint({
-    candidateId: "yanan-pan",
+    candidateId: "candidate-example",
     localDate: "2026-07-29",
     runProfile: "daily",
     profileAsOf: "2026-07-28",
@@ -34,7 +34,7 @@ try {
     profileAsOf: "2026-07-28",
     runProfile: "daily",
     localDate: "2026-07-29",
-    candidateId: "yanan-pan",
+    candidateId: "candidate-example",
   });
   assert.equal(fingerprintA, fingerprintB);
   assert.match(fingerprintA, /^[a-f0-9]{64}$/);
@@ -42,7 +42,7 @@ try {
   const ledgerPath = path.join(tempRoot, "ledger.json");
   const ledger = await RunLedger.create(ledgerPath, {
     runId: "2026-07-29-daily-01",
-    candidateId: "yanan-pan",
+    candidateId: "candidate-example",
     triggerFingerprint: fingerprintA,
   });
   await ledger.transition("LOCK_ACQUIRED");
@@ -96,17 +96,17 @@ try {
     confirmations: path.join(candidateRoot, "candidate-confirmations.json"),
     portfolio: path.join(candidateRoot, "query-portfolio-daily.json"),
   };
-  await fs.writeFile(artifacts.profile, JSON.stringify({ candidate_id: "yanan-pan", as_of: "2026-07-28" }));
-  await fs.writeFile(artifacts.policy, JSON.stringify({ candidate_id: "yanan-pan", status: "confirmed", version: "1.0" }));
-  await fs.writeFile(artifacts.confirmations, JSON.stringify({ candidate_id: "yanan-pan", confirmations: [] }));
+  await fs.writeFile(artifacts.profile, JSON.stringify({ candidate_id: "candidate-example", as_of: "2026-07-28" }));
+  await fs.writeFile(artifacts.policy, JSON.stringify({ candidate_id: "candidate-example", status: "confirmed", version: "1.0" }));
+  await fs.writeFile(artifacts.confirmations, JSON.stringify({ candidate_id: "candidate-example", confirmations: [] }));
   await fs.writeFile(artifacts.portfolio, JSON.stringify({
-    candidate_id: "yanan-pan",
+    candidate_id: "candidate-example",
     run_profile: "daily",
     queries: [{ query_id: "Q1", status: "active" }],
   }));
   let validatorCalls = 0;
   const preflight = await executeDailyPreflight({
-    candidateId: "yanan-pan",
+    candidateId: "candidate-example",
     localDate: "2026-07-29",
     candidateRoot,
     artifacts,
@@ -134,7 +134,7 @@ try {
     trigger: { type: "manual", id: "2026-07-29-daily-01" },
   }));
   const legacyResult = await executeDailyPreflight({
-    candidateId: "yanan-pan",
+    candidateId: "candidate-example",
     localDate: "2026-07-29",
     candidateRoot: legacyCandidateRoot,
     artifacts,

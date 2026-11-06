@@ -7,10 +7,15 @@ param(
     [string]$RunId,
     [Parameter(Mandatory = $true)]
     [string]$CacheRun,
+    [string]$PortfolioPath,
     [int]$MaxQueries = 5,
-    [int]$MaxCards = 25,
+    [int]$MaxCards = 0,
     [int]$MaxUniqueJobs = 60,
     [int]$MaxDetails = 30,
+    [ValidateRange(1, 50)]
+    [int]$MaxPagesPerQuery = 8,
+    [ValidateRange(1, 10)]
+    [int]$MaxStagnantObservations = 2,
     [ValidateRange(1, 5)]
     [int]$DetailConcurrency = 5,
     [string]$ProfilePath = (Join-Path $env:LOCALAPPDATA "Kuafu/chrome-profile"),
@@ -45,8 +50,11 @@ $arguments = @(
     "--max-cards", $MaxCards,
     "--max-unique-jobs", $MaxUniqueJobs,
     "--max-details", $MaxDetails,
+    "--max-pages-per-query", $MaxPagesPerQuery,
+    "--max-stagnant-observations", $MaxStagnantObservations,
     "--detail-concurrency", $DetailConcurrency
 )
+if ($PortfolioPath) { $arguments += @("--portfolio-path", $PortfolioPath) }
 if ($ChromePath) { $arguments += @("--chrome", $ChromePath) }
 
 & $NodePath @arguments

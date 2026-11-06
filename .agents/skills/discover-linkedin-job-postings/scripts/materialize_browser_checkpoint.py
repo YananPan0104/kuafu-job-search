@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -18,6 +19,14 @@ def load_json(path: Path) -> dict:
 
 def canonical_url(job_id: str) -> str:
     return f"https://www.linkedin.com/jobs/view/{job_id}/"
+
+
+def has_collapsed_marker(value: object) -> bool:
+    return bool(re.search(
+        r"(?:\u2026|\.\.\.)?\s*(?:show more|see more|more|mehr anzeigen)\s*$",
+        str(value or "").strip(),
+        re.IGNORECASE,
+    ))
 
 
 def failed_review_entry(card: dict, detail: dict | None) -> dict:
@@ -150,6 +159,8 @@ def posting_from_detail(detail: dict, run_id: str) -> dict:
             "source": "linkedin",
             "retrieval_method": retrieval_method,
             "extraction_warnings": detail.get("extraction_warnings", []),
+            "description_completeness": detail.get("description_completeness"),
+            "description_expansion": detail.get("description_expansion"),
         },
     }
     if detail.get("location"):
@@ -238,7 +249,7 @@ def main() -> None:
             entry["collection_status"] = "skipped_before_detail"
         elif job_id in details:
             detail = details[job_id]
-            if detail.get("retrieval_status") != "retrieved":
+            if detail.get("retrieval_status") != "retrieved" or has_collapsed_marker(detail.get("description")):
                 entry["collection_status"] = "retrieval_failed"
             else:
                 posting = posting_from_detail(detail, run_id)
@@ -260,6 +271,10 @@ def main() -> None:
                 entry["collection_status"] = "retrieval_failed"
             else:
                 cached = load_json(source_json)
+                if has_collapsed_marker(cached.get("description")) or cached.get("discovery", {}).get("description_completeness", "").startswith("incomplete_"):
+                    entry["collection_status"] = "retrieval_failed"
+                    jobs.append(entry)
+                    continue
                 cached.setdefault("discovery", {}).update(
                     {
                         "run_id": run_id,
@@ -315,7 +330,7 @@ def main() -> None:
         "query_visible_card_counts": dict(sorted(counts_by_query.items())),
     }
     manifest = {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "run_id": run_id,
         "candidate_id": portfolio["candidate_id"],
         "source": "linkedin",
@@ -326,10 +341,13 @@ def main() -> None:
         "query_portfolio_path": str(args.portfolio.resolve()),
         "policy_path": str(args.policy.resolve()),
         "filter_verification": filter_verification,
+        "query_progress": checkpoint.get("query_progress", {}),
         "jobs": jobs,
         "failed_jobs_review": failed_jobs_review,
         "metrics": metrics,
         "warnings": checkpoint.get("warnings", []),
+        "stop_reason": checkpoint.get("stop_reason"),
+        "extraction_stopped": bool(checkpoint.get("extraction_stopped", False)),
     }
     manifest_path = run_dir / "run-manifest.json"
     manifest_path.write_text(

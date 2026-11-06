@@ -2,6 +2,7 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { MAX_LOAD_WAIT_MS } from "../../../.agents/skills/discover-linkedin-job-postings/scripts/loading_policy.mjs";
 
 export function findChromeExecutable(options = {}) {
   const platform = options.platform ?? process.platform;
@@ -49,7 +50,7 @@ export function parseDevToolsActivePort(contents) {
 }
 
 export async function waitForDevToolsEndpoint(profilePath, options = {}) {
-  const timeoutMs = options.timeoutMs ?? 15_000;
+  const timeoutMs = options.timeoutMs ?? MAX_LOAD_WAIT_MS;
   const pollMs = options.pollMs ?? 100;
   const activePortPath = path.join(path.resolve(profilePath), "DevToolsActivePort");
   const deadline = Date.now() + timeoutMs;
@@ -67,7 +68,7 @@ export async function waitForDevToolsEndpoint(profilePath, options = {}) {
 async function defaultProbeEndpoint(endpoint) {
   try {
     const response = await fetch(`${endpoint}/json/version`, {
-      signal: AbortSignal.timeout(750),
+      signal: AbortSignal.timeout(MAX_LOAD_WAIT_MS),
     });
     return response.ok;
   } catch {

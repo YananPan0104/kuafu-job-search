@@ -61,4 +61,12 @@ with tempfile.TemporaryDirectory() as temp_dir:
     result = validate_manifest(manifest_path)
     assert result == {"run_id": "contract-test", "jobs": 1, "valid": True}
 
+    posting["description"] = "A long but incomplete description " + ("x" * 400) + " … more"
+    (jobs_dir / "123456789.json").write_text(json.dumps(posting), encoding="utf-8")
+    try:
+        validate_manifest(manifest_path)
+        raise AssertionError("collapsed descriptions must not pass validation")
+    except ValueError as error:
+        assert "collapsed" in str(error).lower()
+
 print("validate_discovery_run tests passed")

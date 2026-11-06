@@ -62,18 +62,18 @@ Skill B is named `discover-linkedin-job-postings`. It consumes the candidate pro
 Generate multiple source-specific query statements from approved profile fields and the search policy. Each query records:
 
 - query ID and purpose;
-- Boolean statement;
+- positive-intent natural-language Smart Search statement;
 - LinkedIn filters;
 - rationale and known noise risks;
 - lifecycle status: `draft`, `active`, or `retired`.
 
 Only `active` queries may run automatically. Approval of a structured Skill A search target also authorizes its deterministic compiled query, so a confirmed policy's approved targets generate `active` queries without a duplicate activation gate. Proposed targets and targets in draft policies generate `draft` queries. Scheduled executions must not silently rewrite active queries.
 
-The Collector compiles structured Skill A search targets into LinkedIn Boolean statements with `generate_query_portfolio.py`. If must-groups, exclusions, or target-level filters change, the target returns to `proposed` and must be reviewed again. Before browser execution, `validate_discovery_inputs.py` requires matching candidate IDs, profile and policy source versions, confirmation-ledger fingerprint and links when referenced, a confirmed policy for active queries, and no required open confirmations.
+The Collector compiles structured Skill A search targets into Smart Search statements with `generate_query_portfolio.py`; exclusions stay in deterministic first-level triage rather than unsupported search syntax. If must-groups, exclusions, or target-level filters change, the target returns to `proposed` and must be reviewed again. Before browser execution, `validate_discovery_inputs.py` requires matching candidate IDs, profile and policy source versions, confirmation-ledger fingerprint and links when referenced, a confirmed policy for active queries, and no required open confirmations.
 
 ### 2. Browser execution
 
-Build a LinkedIn search URL from each active query and its filters. Open it in the authenticated Codex in-app browser and verify the visible filter state once. Fall back to UI interaction only when URL parameters are not applied correctly.
+Enter Smart Search through its visible controls in the authenticated browser and submit each active query's exact compiled text. Apply and visibly verify `Past 24 hours` for daily runs and record `semantic_relevance`; URL parameters are supporting evidence rather than a substitute for visible verification. Collect exact-match cards until the visible related-results boundary or genuine exhaustion, respecting the canonical discovery skill's source-specific rules and safety stops.
 
 Read only job listings and descriptions visible to the signed-in user. Do not call private LinkedIn APIs, enumerate unknown job IDs, bypass access controls, auto-apply, auto-save, or create alerts.
 
@@ -106,7 +106,7 @@ Normalize the complete visible JD to schema.org `JobPosting` JSON plus readable 
 - the candidate confirmation ledger and confirmed search policy when candidate statements or candidate-side gates affect screening;
 - one normalized JobPosting from Skill B, or an equivalent PDF, URL, or pasted JD.
 
-It automatically screens every retrieved or cached JD, applies `PASS`, `HOLD`, or `FAIL`, and automatically generates an evidence-bound CV for `PASS` or explicitly `OVERRIDDEN` jobs. There is no confirmation gate between validated JD extraction and screening, or between `PASS` and CV generation.
+When the requested workflow includes screening, it assesses every retrieved or cached JD and applies `PASS`, `HOLD`, or `FAIL`. `PASS` and explicitly `OVERRIDDEN` jobs advance automatically through drafting and independent content review. There is no duplicate fit-approval gate, but new facts, ambiguous claims, evidence conflicts, and key-experience deletion/omission/material compression require scoped user approval before changing content. Pending decisions checkpoint the case before final generation.
 
 Skill C must reuse the canonical valid candidate profile, ledger, and policy. Missing, stale, conflicting, or fingerprint-mismatched candidate artifacts return to `prepare-candidate-job-search`; Skill C must not silently rebuild them. A candidate-side hard gate uses `hardness_basis: candidate_policy` and cites both the resolved policy item and active scoped ledger confirmation. Skill C must not contain LinkedIn DOM or query-generation logic.
 
@@ -136,14 +136,22 @@ flowchart TD
     G5 -- FAIL --> X["Stop unless explicit override"]
     G5 -- HOLD --> H["Ask only gate-changing fact questions"]
     H --> D
-    G5 -- PASS --> C["Automatic CV generation"]
+    G5 -- PASS --> C["CV and optional cover-letter draft"]
     X -->|Override| C
-    C --> G6{"Evidence, build, and QA valid?"}
+    C --> CR["Independent draft content review"]
+    CR --> CA{"Sensitive content change?"}
+    CA -- Yes --> CU["Present proposal and obtain scoped user approval"]
+    CU --> CF["Resolve feedback with evidence"]
+    CA -- No --> CF
+    CF --> CP{"Facts and pending decisions resolved?"}
+    CP -- No --> CB["Checkpoint before final generation"]
+    CP -- Yes --> CD["Finalize content and build documents"]
+    CD --> G6{"Final visual and text QA valid?"}
     G6 -- No --> B6["Operational blocker or bounded regeneration"]
     G6 -- Yes --> O["Final JD-specific DOCX and PDF CV"]
 ```
 
-Human decisions remain only at initial profile/search onboarding, unresolved `HOLD` facts, and an explicit override of `FAIL`. Artifact validation, first-level triage, detailed screening, `PASS` advancement, CV building, and CV QA are automatic. Automatic CV generation does not authorize application submission.
+Human decisions cover initial profile/search onboarding, unresolved `HOLD` facts, explicit overrides of `FAIL`, and scoped sensitive-content changes. Supported editorial refinements, artifact validation, triage, screening, `PASS` advancement, file building, and final QA run automatically within those boundaries. Automatic document generation does not authorize application submission. The graph describes an explicitly requested end-to-end run, not the discovery-only daily aliases.
 
 ## Orchestration layer
 
@@ -155,7 +163,7 @@ Before unattended scheduling is production-ready, use a once-daily conversationa
 
 1. Open the project in Codex and ensure the in-app browser is available.
 2. Ask Codex to run today's job search for the candidate, for example: `Run today's job search for <candidate-id> and continue through screening and PASS CV generation.`
-3. Use the active `daily` query portfolio, `Past 24 hours`, recent-first ordering, and a stable date-based run ID.
+3. Use the active `daily` Smart Search portfolio, visibly verify `Past 24 hours`, record `semantic_relevance` ranking, and use a stable date-based run ID.
 4. Resolve LinkedIn login expiry, CAPTCHA, or access challenges manually in the visible in-app browser, then resume the same run.
 5. Automatically pass every validated `retrieved` or `cached` JD into detailed screening.
 6. Automatically generate and QA a JD-specific CV for every `PASS` or explicitly `OVERRIDDEN` result.
@@ -165,7 +173,7 @@ Before unattended scheduling is production-ready, use a once-daily conversationa
 Run only one daily search at a time. If a daily run is missed or materially fails, use a manually requested recovery window such as Past 48 hours or Past week and rely on job-ID/content-hash deduplication; do not assume the next strict Past 24 hours run covers the gap.
 
 - A scheduled trigger invokes Skill B with a stable run ID and the current active query portfolio.
-- Daily production triggers use a dedicated `daily` run profile with a `Past 24 hours` window and recent-first ordering. Broader windows belong to an explicitly requested, bounded `capability_test` profile and must not become the daily default.
+- Daily production triggers use a dedicated `daily` run profile with a visible `Past 24 hours` filter and Smart Search `semantic_relevance` ranking. Broader windows belong to an explicitly requested, bounded `capability_test` profile.
 - An email connector may extract a LinkedIn alert URL and pass the event payload to Skill B.
 - Skill B remains idempotent by deduplicating trigger IDs and LinkedIn job IDs.
 - Authentication expiry, CAPTCHA, or a material page-structure change stops the run and requires user attention.
@@ -225,6 +233,12 @@ discovery/<candidate-id>/
 Each retrieved `<job-id>.json` is a schema.org `JobPosting`. The run manifest may add discovery metadata but must not inject candidate fit claims into the JobPosting record.
 
 ## Responsibility matrix
+
+Application tailoring uses one content owner per job and one independent, read-only draft reviewer. Content proceeds through draft, independent review, scoped feedback resolution, then document generation and final visual/text QA. Review-only requests use the same review procedure without editing or generating files. See the canonical [draft-review procedure](../../.agents/skills/tailor-job-application/references/draft-content-review.md) and repository `AGENTS.md` for model routing, compact artifact handoffs, source-version audit reuse, and approval boundaries.
+
+A directly supplied JD skips discovery and reuses valid candidate artifacts. For a single job, the root may be the content owner; the reviewer must be a separate independent agent. Multi-skill requests use serial stage workers, while each job keeps a separate execution context. These are agent instructions, not a programmatically enforced model scheduler. Actual worker models must be checked at dispatch; unavailable selections are reported rather than silently substituted. The daily-scan aliases stop after validated JD extraction even though a separately requested end-to-end run can continue to Skill C.
+
+Supported editorial refinements run automatically. New facts, ambiguous claims/metrics, evidence conflicts, and deletion/omission/material compression of key experience require a concrete proposal and explicit scoped user approval before changing affected content, even during initial drafting. Candidate-fact revisions remain owned by profile preparation. Pending decisions checkpoint the case before final generation. This conversational review contract does not add a hard approval validator to the legacy document builder or promise a fixed token budget.
 
 | Component | Owns | Must not own |
 |---|---|---|

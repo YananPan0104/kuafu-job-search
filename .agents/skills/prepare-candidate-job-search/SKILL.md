@@ -38,6 +38,8 @@ Read `references/candidate-profile-contract.md` before creating or revising a pr
 
 ## Tools
 
+- `scripts/export_candidate_profile_docx.py --profile <candidate-profile.json> --confirmations <candidate-confirmations.json> --output <profile.docx>`: export the complete evidence-linked profile as a reviewable, non-CV DOCX for candidate refinement. The confirmation ledger remains a separate backend provenance artifact unless `--include-confirmation-ledger` is explicitly requested.
+
 - `scripts/candidate_search_policy.py validate-profile --profile <profile.json>`: validate candidate facts and emit the canonical profile fingerprint.
 - `scripts/candidate_search_policy.py draft --profile <profile.json> --output <policy.json>`: create a candidate-neutral draft policy scaffold.
 - `scripts/candidate_search_policy.py validate --profile <profile.json> --policy <policy.json> [--confirmations <candidate-confirmations.json>]`: validate schema, evidence references, ledger links, screening-gate scopes, confirmation state, and candidate identity.

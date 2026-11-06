@@ -69,6 +69,18 @@ def validate_inputs(profile: dict, policy: dict, portfolio: dict, confirmations:
     if invalid_statuses:
         raise ValueError(f"queries have invalid status: {invalid_statuses}")
     active = [query for query in queries if query.get("status") == "active"]
+    for query in active:
+        if query.get("search_mode") != "smart_natural_language":
+            raise ValueError(f"active query {query.get('query_id')} must use smart_natural_language")
+        if query.get("ranking_mode") != "semantic_relevance":
+            raise ValueError(f"active query {query.get('query_id')} must use semantic_relevance ranking")
+        if "sort_by" in (query.get("filters") or {}):
+            raise ValueError(f"active query {query.get('query_id')} retains obsolete sort_by")
+        smart = query.get("smart_search") or {}
+        if not str(smart.get("submitted_query", "")).strip():
+            raise ValueError(f"active query {query.get('query_id')} lacks a Smart Search query")
+        if "statement" in query:
+            raise ValueError(f"active query {query.get('query_id')} retains obsolete Boolean execution")
     open_required = [
         item.get("id")
         for item in policy.get("confirmation_items", [])

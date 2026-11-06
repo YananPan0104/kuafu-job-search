@@ -15,8 +15,8 @@ function Resolve-CommandPath {
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $bundledRuntime = Join-Path $env:USERPROFILE ".cache/codex-runtimes/codex-primary-runtime/dependencies"
-$python = Resolve-CommandPath @("python", "python3", (Join-Path $bundledRuntime "python/python.exe"))
-$node = Resolve-CommandPath @("node", (Join-Path $bundledRuntime "node/bin/node.exe"))
+$python = Resolve-CommandPath @((Join-Path $bundledRuntime "python/python.exe"), "python", "python3")
+$node = Resolve-CommandPath @((Join-Path $bundledRuntime "node/bin/node.exe"), "node")
 
 $pythonTests = @(
     ".agents/skills/prepare-candidate-job-search/scripts/test_candidate_confirmations.py",
@@ -24,10 +24,13 @@ $pythonTests = @(
     ".agents/skills/discover-linkedin-job-postings/scripts/test_query_portfolio_workflow.py",
     ".agents/skills/discover-linkedin-job-postings/scripts/test_materialize_browser_checkpoint.py",
     ".agents/skills/discover-linkedin-job-postings/scripts/test_validate_discovery_run.py",
+    ".agents/skills/discover-linkedin-job-postings/scripts/test_audit_discovery_descriptions.py",
     ".agents/skills/tailor-job-application/scripts/test_materialize_screening_batch.py"
+    ".agents/skills/tailor-job-application/scripts/test_detect_jd_language.py"
 )
 
 $nodeTests = @(
+    ".agents/skills/discover-linkedin-job-postings/scripts/test_loading_policy.mjs",
     "runtime/test/phase1-runner.test.mjs",
     "runtime/test/phase2-browser.test.mjs",
     "runtime/test/phase3-discovery.test.mjs",

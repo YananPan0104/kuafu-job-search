@@ -43,15 +43,25 @@ flowchart TD
 
     M --> N{"最终硬指标 Gate"}
     N -- "FAIL" --> NF["停止，不生成 CV"]
-    NF -->|"用户明确 Override"| P["自动生成对应 CV"]
+    NF -->|"用户明确 Override"| P["生成 CV 和按需 Cover Letter 草稿"]
     N -- "HOLD" --> NH["只询问可能改变 Gate 的事实"]
     NH --> M
     N -- "PASS" --> P
 
-    P --> Q{"事实、DOCX 构建和页面 QA 通过？"}
+    P --> PR["无继承聊天历史的独立内容审查"]
+    PR --> PA{"是否涉及敏感内容变更？"}
+    PA -- "是" --> PU["展示原文、建议、理由、证据和影响，等待明确批准"]
+    PU --> PV["按批准范围和证据处理反馈"]
+    PA -- "否" --> PV
+    PV --> PF{"事实问题和待批准事项已解决？"}
+    PF -- "否" --> PX["保存 checkpoint，保持受影响内容不变"]
+    PF -- "是" --> PD["内容定稿并生成 DOCX/PDF"]
+    PD --> Q{"最终页面与文字提取 QA 通过？"}
     Q -- "否" --> QX["操作阻塞或有限自动重建"]
     Q -- "是" --> R["输出 JD 对应的 DOCX 和 PDF CV"]
 ```
+
+该图描述明确请求的端到端流程。仅提供 JD 时从详细 screening 开始，复用有效档案；每日扫描别名在 JD 提取校验后停止。项目仍是三个 skill，Tailoring 内部包含内容负责人和独立审查者，而非第四个 skill。单个 JD 可由主模型担任内容负责人；多岗位分开上下文，多 skill 按依赖串行交接。实际模型选择与升级规则以 [AGENTS.md](../../AGENTS.md) 为准；当前依靠执行指令约束，没有程序级模型强制调度。
 
 ## 3. 输入和核心产物
 
@@ -91,9 +101,14 @@ cases/
   <verified-employer-role>/
     input/
     work/
+      case-config.draft.json
+      application-draft.md
+      review-handoff.json
+      review-resolution.json
       case-config.json
       candidate-profile.json or profile reference
     review/
+      content-review.md
       cv-change-proposal.md
     output/
       <candidate>-<role>-cv.docx
@@ -158,7 +173,7 @@ cases/
 正式 daily portfolio 默认使用：
 
 - Date posted：Past 24 hours；
-- Sort：Most recent；
+- Ranking：Smart Search semantic_relevance（无可选排序控件）；
 - Employment type：Full-time；
 - Experience level：由已确认 policy 决定；
 - Location：由已确认 policy 决定。
@@ -239,7 +254,7 @@ cases/
 - extraction warnings；
 - cache 和 retrieval 状态。
 
-所有 `retrieved` 或 `cached` JD 通过验证后自动进入详细 screening，不逐个请求确认。
+明确请求端到端运行时，所有 `retrieved` 或 `cached` JD 通过验证后自动进入详细 screening，不逐个请求确认。若触发的是仅扫描指令，则在此保存结果并停止。
 
 ## 10. 详细 screening 阶段
 
@@ -284,12 +299,13 @@ PASS 或 OVERRIDDEN 后自动执行：
    - 候选人证据；
    - 风险。
 6. 将 learnable gaps 存入 optimization backlog。
-7. 生成 ATS-first DOCX。
-8. 渲染并检查每一页。
-9. 检查导出文本顺序和可选择性。
-10. QA 通过后导出 PDF。
+7. 保存完整 CV 草稿；如请求 Cover Letter，在同阶段起草，避免逐条重复 CV。
+8. 启动无继承聊天历史的独立只读审查者，基于完整 JD、草稿、baseline 和候选事实证据审查内容，不先生成最终 PDF。
+9. 内容负责人自动执行有充分证据的措辞、排序和格式调整。新增事实、口径不清、证据冲突，以及关键经历的删除、略过或实质压缩，须先展示原文、建议、理由、证据和影响，经用户明确批准后才能修改；初稿阶段同样适用，岗位相关性低不免除此审批。
+10. 保存逐项处理记录和批准来源，完成草稿修订与针对性复核。待批准的内容保持不变，有未解决问题时保存 checkpoint，不生成最终文件。新增候选事实须返回 profile 阶段核实入档。
+11. 内容定稿后生成 ATS-first DOCX，逐页检查视觉和文本提取，QA 通过后导出 PDF。内容审查不能替代最终文件 QA。
 
-PASS 到 CV 输出之间不设置重复人工确认门。缺少必要联系信息、文件构建失败或 QA 失败属于操作性 blocker，而不是新的 fit gate。
+PASS 后不再重复询问岗位是否适合申请，但上述敏感内容修改需要单独的明确批准。每个岗位默认一位内容负责人和一位独立审查者，按本地文件位置、版本和指纹交接，不转发整段聊天；文件读取仍消耗 token。详情见 [草稿审查规则](../../.agents/skills/tailor-job-application/references/draft-content-review.md)。现有 builder 不提供程序级审批拦截，这一边界由 skill 执行规则保证。
 
 ## 12. 所有人工门控
 
@@ -303,6 +319,7 @@ PASS 到 CV 输出之间不设置重复人工确认门。缺少必要联系信�
 | PASS 进入 CV 生成 | 否 | 自动进入 |
 | HOLD | 是 | 只询问可能改变 gate 的事实 |
 | FAIL override | 是 | 用户明确承担不匹配风险 |
+| 敏感内容变更 | 是 | 新增事实、口径不清、冲突或关键经历删减/略过；按具体建议批准 |
 | CV QA | 否 | 自动检查和有限重建 |
 | 自动提交申请 | 不支持 | 需要未来单独设计和授权 |
 

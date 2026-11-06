@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from detect_jd_language import analyze_jd_language
 from validate_case import validate
 
 
@@ -25,6 +26,64 @@ def write_json(path: Path, value: object) -> None:
 def profile_fingerprint(profile: dict) -> str:
     payload = json.dumps(profile, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+
+def load_job_description(manifest_path: Path, job: dict) -> str:
+    relative = Path(str(job.get("jobposting_json", "")))
+    if not relative.parts or relative.is_absolute():
+        raise ValueError(f"job {job.get('job_id')} has an invalid JobPosting path")
+    run_root = manifest_path.parent.resolve()
+    source = (run_root / relative).resolve()
+    try:
+        source.relative_to(run_root)
+    except ValueError as exc:
+        raise ValueError(f"job {job.get('job_id')} JobPosting path leaves the discovery run") from exc
+    posting = load_json(source)
+    description = posting.get("description")
+    if not isinstance(description, str) or not description.strip():
+        raise ValueError(f"job {job.get('job_id')} JobPosting description is missing")
+    return description
+
+
+def validate_german_jd_gate(job: dict, screening: dict, detection: dict) -> None:
+    if not detection["is_german"]:
+        return
+    language_requirements = [
+        requirement for requirement in screening.get("requirements", [])
+        if requirement.get("criterion") == "JD language is German"
+    ]
+    if screening.get("underlying_gate") != "FAIL" or screening.get("gate") not in {"FAIL", "OVERRIDDEN"}:
+        raise ValueError(f"job {job['job_id']} has a German JD body and requires underlying FAIL")
+    if "JD_LANGUAGE_GERMAN" not in screening.get("reason_codes", []):
+        raise ValueError(f"job {job['job_id']} German JD FAIL lacks JD_LANGUAGE_GERMAN")
+    if not language_requirements:
+        raise ValueError(f"job {job['job_id']} German JD FAIL lacks its language requirement")
+    requirement = language_requirements[0]
+    if not (
+        requirement.get("classification") == "hard"
+        and requirement.get("hardness_basis") == "user_override"
+        and requirement.get("candidate_status") == "unmet"
+    ):
+        raise ValueError(f"job {job['job_id']} German JD language requirement is invalid")
+    recorded = screening.get("jd_language_detection")
+    if not isinstance(recorded, dict) or recorded.get("detector_version") != detection["detector_version"]:
+        raise ValueError(f"job {job['job_id']} German JD FAIL lacks current detector evidence")
+    if screening.get("gate") == "OVERRIDDEN":
+        authorization = screening.get("override")
+        if not isinstance(authorization, dict) or authorization.get("job_id") != job["job_id"]:
+            raise ValueError(f"job {job['job_id']} language override requires matching job scope")
+        for field in ("user_answer", "user_message_locator"):
+            if not isinstance(authorization.get(field), str) or not authorization[field].strip():
+                raise ValueError(f"job {job['job_id']} language override requires {field}")
+        scope = authorization.get("requirement_ids")
+        if not isinstance(scope, list) or not all(isinstance(item, str) for item in scope):
+            raise ValueError(f"job {job['job_id']} language override requires requirement_ids")
+        unresolved = {
+            item.get("id") for item in screening.get("requirements", [])
+            if item.get("classification") == "hard" and item.get("candidate_status") != "met"
+        }
+        if not unresolved.issubset(set(scope)):
+            raise ValueError(f"job {job['job_id']} has unwaived hard requirements")
 
 
 def screening_markdown(job: dict, screening: dict) -> str:
@@ -86,6 +145,8 @@ def materialize(candidate_path: Path, manifest_path: Path, assessments_path: Pat
             raise ValueError(f"assessment[{index}] is invalid: {'; '.join(errors)}")
         if job_id not in screening.get("case_id", ""):
             raise ValueError(f"assessment[{index}] case_id must contain the job ID")
+        language_detection = analyze_jd_language(load_job_description(manifest_path, job))
+        validate_german_jd_gate(job, screening, language_detection)
 
         job_dir = output_dir / job_id
         job_dir.mkdir(parents=True, exist_ok=True)
@@ -119,6 +180,7 @@ def materialize(candidate_path: Path, manifest_path: Path, assessments_path: Pat
             "recommendation": screening["recommendation"],
             "screening_report": f"{job_id}/screening-report.json",
             "next_action": next_action,
+            "jd_language": language_detection["language"],
         })
 
     application_candidates = [

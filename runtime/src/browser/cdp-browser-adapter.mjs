@@ -1,3 +1,5 @@
+import { MAX_LOAD_WAIT_MS } from "../../../.agents/skills/discover-linkedin-job-postings/scripts/loading_policy.mjs";
+
 export class CdpBrowserAdapter {
   constructor(browser, context) {
     this.browser = browser;
@@ -14,16 +16,18 @@ export class CdpBrowserAdapter {
       }
     });
     const chromium = await loadChromium();
-    const browser = await chromium.connectOverCDP(endpoint);
+    const browser = await chromium.connectOverCDP(endpoint, { timeout: MAX_LOAD_WAIT_MS });
     const context = browser.contexts()[0];
     if (!context) throw new Error("Chrome CDP connection did not expose a browser context");
+    context.setDefaultTimeout?.(MAX_LOAD_WAIT_MS);
+    context.setDefaultNavigationTimeout?.(MAX_LOAD_WAIT_MS);
     return new CdpBrowserAdapter(browser, context);
   }
 
   async openTab(url) {
     const page = await this.context.newPage();
     const tab = {
-      goto: (target) => page.goto(target, { waitUntil: "domcontentloaded" }),
+      goto: (target) => page.goto(target, { waitUntil: "domcontentloaded", timeout: MAX_LOAD_WAIT_MS }),
       url: () => page.url(),
       snapshot: () => page.locator("body").innerText(),
       close: () => page.close(),

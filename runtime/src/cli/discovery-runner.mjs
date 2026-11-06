@@ -37,7 +37,7 @@ async function main(argv) {
     profile: path.join(candidateRoot, "candidate-profile.json"),
     policy: path.join(candidateRoot, "job-search-policy.json"),
     confirmations: path.join(candidateRoot, "candidate-confirmations.json"),
-    portfolio: path.join(candidateRoot, "query-portfolio-daily.json"),
+    portfolio: path.resolve(args["portfolio-path"] ?? path.join(candidateRoot, "query-portfolio-daily.json")),
   };
   const skillScripts = path.join(repoRoot, ".agents", "skills", "discover-linkedin-job-postings", "scripts");
   await runValidationScript({
@@ -67,17 +67,21 @@ async function main(argv) {
     if (authentication.status !== "AUTHENTICATED") {
       throw new Error(`LinkedIn preflight stopped with ${authentication.status}`);
     }
+    const portfolio = await readJson(artifacts.portfolio);
+    const requestedCardCap = Number(args["max-cards"] ?? 0);
     const result = await runDiscoveryPhase3({
       runId,
       checkpointPath: path.join(runDir, "browser-checkpoint.json"),
-      portfolio: await readJson(artifacts.portfolio),
+      portfolio,
       policy: await readJson(artifacts.policy),
       browser,
       budgets: {
         maxQueries: Number(args["max-queries"] ?? 5),
-        maxCardsPerQuery: Number(args["max-cards"] ?? 25),
+        maxCardsPerQuery: requestedCardCap > 0 ? requestedCardCap : Number(portfolio.collection_limit ?? 25),
         maxUniqueJobs: Number(args["max-unique-jobs"] ?? 60),
         maxDetailJobs: Number(args["max-details"] ?? 30),
+        maxPagesPerQuery: Number(args["max-pages-per-query"] ?? 8),
+        maxStagnantObservations: Number(args["max-stagnant-observations"] ?? 2),
         detailConcurrency: Number(args["detail-concurrency"] ?? 5),
       },
     });

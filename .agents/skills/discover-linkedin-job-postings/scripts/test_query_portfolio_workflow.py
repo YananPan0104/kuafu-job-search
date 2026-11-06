@@ -23,12 +23,12 @@ POLICY = {
         "date_posted": "Past week",
         "employment_type": ["Full-time"],
         "experience_level": ["Entry level"],
-        "sort_by": "Most recent",
+        "ranking_mode": "semantic_relevance",
     },
     "default_run_profile": "daily",
     "run_profiles": {
-        "daily": {"filter_overrides": {"date_posted": "Past 24 hours", "sort_by": "Most recent"}, "collection_limit": 100},
-        "capability_test": {"filter_overrides": {"date_posted": "Past week", "sort_by": "Most relevant"}, "collection_limit": 20},
+        "daily": {"filter_overrides": {"date_posted": "Past 24 hours"}, "collection_limit": 100},
+        "capability_test": {"filter_overrides": {"date_posted": "Past week"}, "collection_limit": 20},
     },
     "confirmation_items": [{"id": "role-targets", "required": True, "status": "open"}],
     "search_targets": [{
@@ -52,15 +52,31 @@ portfolio = generate_portfolio(PROFILE, POLICY)
 assert portfolio["candidate_id"] == "candidate-b"
 assert portfolio["queries"][0]["status"] == "draft"
 assert portfolio["source_profile_fingerprint"] == profile_fingerprint(PROFILE)
-assert portfolio["queries"][0]["statement"] == '("data analyst" OR "business analyst") AND (SQL OR Tableau) NOT (intern OR "software engineer")'
+assert "statement" not in portfolio["queries"][0]
+assert portfolio["queries"][0]["search_mode"] == "smart_natural_language"
+assert portfolio["queries"][0]["smart_search"]["submitted_query"] == (
+    "Entry-level data analyst or business analyst roles in Netherlands involving SQL or Tableau"
+)
+assert portfolio["queries"][0]["smart_search"]["excluded_terms_supported"] is False
+assert portfolio["queries"][0]["smart_search"]["excluded_terms_deferred_to_triage"] == [
+    "intern", "software engineer"
+]
+assert "intern" not in portfolio["queries"][0]["smart_search"]["submitted_query"].lower()
+assert len(portfolio["queries"][0]["smart_search"]["query_fingerprint"]) == 71
+assert set(portfolio["queries"][0]["smart_search"]["smoke_variants"]) == {
+    "role_first", "role_context", "responsibility_context"
+}
 assert portfolio["run_profile"] == "daily"
 assert portfolio["collection_limit"] == 100
 assert portfolio["queries"][0]["filters"]["date_posted"] == "Past 24 hours"
+assert "sort_by" not in portfolio["queries"][0]["filters"]
+assert portfolio["queries"][0]["ranking_mode"] == "semantic_relevance"
 assert validate_inputs(PROFILE, POLICY, portfolio)["active_queries"] == 0
 
 test_portfolio = generate_portfolio(PROFILE, POLICY, "capability_test")
 assert test_portfolio["collection_limit"] == 20
 assert test_portfolio["queries"][0]["filters"]["date_posted"] == "Past week"
+assert "sort_by" not in test_portfolio["queries"][0]["filters"]
 
 active = copy.deepcopy(portfolio)
 active["queries"][0]["status"] = "active"
